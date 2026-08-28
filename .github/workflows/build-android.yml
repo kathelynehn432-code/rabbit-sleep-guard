@@ -23,9 +23,18 @@ jobs:
           gradle-version: "8.11.1"
       - name: Build debug APK
         run: gradle -p android :app:assembleDebug
+      - name: Give APK a versioned filename
+        id: package
+        shell: bash
+        run: |
+          version="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          test -n "$version"
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/rabbit-sleep-guard-v${version}.apk"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Upload installable APK
         uses: actions/upload-artifact@v7
         with:
-          name: rabbit-sleep-guard-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: rabbit-sleep-guard-v${{ steps.package.outputs.version }}
+          path: dist/rabbit-sleep-guard-v${{ steps.package.outputs.version }}.apk
           if-no-files-found: error

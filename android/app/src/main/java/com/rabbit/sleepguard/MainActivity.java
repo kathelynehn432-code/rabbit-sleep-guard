@@ -83,7 +83,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView title = text("兔酱睡眠守卫", 30, Color.rgb(23, 30, 50));
+        TextView title = text("兔酱睡眠守卫 · v" + BuildConfig.VERSION_NAME, 30, Color.rgb(23, 30, 50));
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
         TextView intro = text("官端或服务器里的 Codex 判断你准备睡觉并开启守卫后，这台手机会拦住选中的应用；不要求固定说“晚安”。", 16, Color.rgb(78, 88, 116));

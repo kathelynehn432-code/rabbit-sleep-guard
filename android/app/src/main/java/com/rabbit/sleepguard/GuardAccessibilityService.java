@@ -34,6 +34,9 @@ public final class GuardAccessibilityService extends AccessibilityService {
     private View overlay;
     private String lastPackage = "";
     private long lastHandledAt = 0L;
+    private boolean screenLockRequestedByUser = false;
+
+    private final Runnable lockAfterReturningHome = this::lockScreenIfRequested;
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -108,10 +111,14 @@ public final class GuardAccessibilityService extends AccessibilityService {
     }
 
     private void goBackToSleep() {
+        main.removeCallbacks(lockAfterReturningHome);
         removeOverlay();
         performGlobalAction(GLOBAL_ACTION_HOME);
         if (preferences.lockScreen()) {
-            main.postDelayed(this::lockScreenIfAllowed, 450L);
+            screenLockRequestedByUser = true;
+            main.postDelayed(lockAfterReturningHome, 450L);
+        } else {
+            screenLockRequestedByUser = false;
         }
     }
 
@@ -133,6 +140,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
     }
 
     private void showPendingOverlay(String appName) {
+        cancelPendingScreenLock();
         removeOverlay();
         LinearLayout card = baseCard();
         TextView title = title("正在确认睡眠守卫…");
@@ -143,6 +151,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
     }
 
     private void showGuardOverlay(String appName, int attempts, String stage, boolean unlocksRevoked) {
+        cancelPendingScreenLock();
         removeOverlay();
         LinearLayout card = baseCard();
         card.addView(title("被比比抓到了"));
@@ -174,6 +183,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
         TextView note = body(unlocksRevoked
                 ? "今晚的临时解锁资格已经取消，守卫会持续到设定的结束时间。"
                 : "申请会留下记录并回到守卫 App，不会清掉今晚的偷开次数。");
+        note.setText(note.getText() + "\n当前版本 v" + BuildConfig.VERSION_NAME);
         note.setTextSize(13f);
         note.setTextColor(Color.rgb(139, 148, 177));
         note.setPadding(0, dp(16), 0, 0);
@@ -240,7 +250,8 @@ public final class GuardAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
                 PixelFormat.TRANSLUCENT
         );
         params.gravity = Gravity.TOP | Gravity.START;
@@ -278,7 +289,14 @@ public final class GuardAccessibilityService extends AccessibilityService {
         return "refused_sleep";
     }
 
-    private void lockScreenIfAllowed() {
+    private void cancelPendingScreenLock() {
+        main.removeCallbacks(lockAfterReturningHome);
+        screenLockRequestedByUser = false;
+    }
+
+    private void lockScreenIfRequested() {
+        if (!screenLockRequestedByUser) return;
+        screenLockRequestedByUser = false;
         DevicePolicyManager policy = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName admin = new ComponentName(this, GuardDeviceAdminReceiver.class);
         if (policy != null && policy.isAdminActive(admin)) {
@@ -311,6 +329,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         main.removeCallbacksAndMessages(null);
+        screenLockRequestedByUser = false;
         removeOverlay();
         super.onDestroy();
     }
