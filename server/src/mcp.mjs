@@ -8,11 +8,11 @@ const tools = [
   {
     name: "activate_sleep_guard",
     title: "开启兔酱睡眠守卫",
-    description: "当使用者明确说晚安、准备睡觉，或要求开始管手机时调用。应在回复最终晚安之前开启。可选指定未来 24 小时内的结束时间。",
+    description: "当使用者明确说晚安、准备睡觉，或要求开始管手机时调用。应在回复最终晚安之前开启。省略 ends_at 时固定在下一个北京时间早上 06:30 自动解除；只有使用者当晚另行指定结束时间时才传 ends_at。",
     inputSchema: {
       type: "object",
       properties: {
-        ends_at: { type: "string", description: "可选的 ISO 8601 结束时间，必须在未来 24 小时内。" },
+        ends_at: { type: "string", description: "仅在使用者另行指定时填写的 ISO 8601 结束时间，必须在未来 24 小时内；默认留空以使用下一个北京时间 06:30。" },
       },
       additionalProperties: false,
     },
@@ -78,7 +78,7 @@ async function handleMessage(message, guard, source) {
       protocolVersion: PROTOCOL_VERSIONS.has(requested) ? requested : DEFAULT_PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "rabbit-sleep-guard", version: "0.1.0" },
-      instructions: "使用者明确说晚安或准备睡觉时，先调用 activate_sleep_guard；明确说早安、已起床或要求解除时调用 deactivate_sleep_guard；询问守卫或次数时调用 get_sleep_guard_status。不要自行解除。",
+      instructions: "使用者明确说晚安或准备睡觉时，先调用 activate_sleep_guard，默认不传 ends_at，由服务器锁到下一个北京时间早上 06:30；只有使用者当晚另行指定时间时才传 ends_at。明确说早安、已起床或要求解除时调用 deactivate_sleep_guard；询问守卫或次数时调用 get_sleep_guard_status。不要自行解除。",
     });
   }
   if (message.method === "ping") return result(id, {});
@@ -119,4 +119,3 @@ export async function handleMcp(request, response, guard, oauth, config) {
 }
 
 export { tools as mcpTools };
-

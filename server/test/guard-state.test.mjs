@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyGuardEvent, emptyState, publicState, shouldAutoStart } from "../src/guard-state.mjs";
 
-const config = { wakeHour: 11, autoStartHour: 1, utcOffsetMinutes: 480 };
+const config = { wakeHour: 6, wakeMinute: 30, autoStartHour: 1, utcOffsetMinutes: 480 };
 
 test("start, count, and stop preserve one session", () => {
   let transition = applyGuardEvent(null, { event: "sleep_guard_started", ends_at: "2026-08-29T03:00:00.000Z" }, "2026-08-28T14:00:00.000Z", config);
@@ -23,6 +23,8 @@ test("start, count, and stop preserve one session", () => {
 
 test("late-night app open auto-starts and a manual wake suppresses it", () => {
   assert.equal(shouldAutoStart(new Date("2026-08-28T17:00:00.000Z"), config), true);
+  assert.equal(shouldAutoStart(new Date("2026-08-28T22:29:00.000Z"), config), true);
+  assert.equal(shouldAutoStart(new Date("2026-08-28T22:30:00.000Z"), config), false);
   let transition = applyGuardEvent(emptyState("2026-08-28T17:00:00.000Z"), { event: "blocked_app_opened" }, "2026-08-28T17:00:00.000Z", config);
   assert.equal(transition.auto_started, true);
   assert.equal(transition.state.attempts, 1);
@@ -39,3 +41,20 @@ test("publicState treats expired sessions as inactive", () => {
   assert.equal(publicState(state).active, false);
 });
 
+test("default end is the next China-time 06:30", () => {
+  let transition = applyGuardEvent(
+    null,
+    { event: "sleep_guard_started" },
+    "2026-08-28T14:30:00.000Z",
+    config,
+  );
+  assert.equal(transition.state.ends_at, "2026-08-28T22:30:00.000Z");
+
+  transition = applyGuardEvent(
+    null,
+    { event: "sleep_guard_started" },
+    "2026-08-28T18:00:00.000Z",
+    config,
+  );
+  assert.equal(transition.state.ends_at, "2026-08-28T22:30:00.000Z");
+});

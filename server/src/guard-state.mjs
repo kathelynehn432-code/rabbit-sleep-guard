@@ -31,7 +31,7 @@ export function nextWakeTime(now, config) {
     local.getUTCMonth(),
     local.getUTCDate(),
     config.wakeHour,
-    0,
+    config.wakeMinute ?? 0,
     0,
     0,
   ) - config.utcOffsetMinutes * 60_000);
@@ -40,11 +40,14 @@ export function nextWakeTime(now, config) {
 }
 
 export function shouldAutoStart(now, config) {
-  const hour = localHour(now, config);
-  if (config.autoStartHour < config.wakeHour) {
-    return hour >= config.autoStartHour && hour < config.wakeHour;
+  const local = shifted(now, config.utcOffsetMinutes);
+  const currentMinute = local.getUTCHours() * 60 + local.getUTCMinutes();
+  const startMinute = config.autoStartHour * 60;
+  const wakeMinute = config.wakeHour * 60 + (config.wakeMinute ?? 0);
+  if (startMinute < wakeMinute) {
+    return currentMinute >= startMinute && currentMinute < wakeMinute;
   }
-  return hour >= config.autoStartHour || hour < config.wakeHour;
+  return currentMinute >= startMinute || currentMinute < wakeMinute;
 }
 
 function normalizeEnd(value, now, config) {
@@ -202,4 +205,3 @@ export function publicState(state) {
     updated_at: state?.updated_at ?? null,
   };
 }
-

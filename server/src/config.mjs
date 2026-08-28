@@ -25,7 +25,8 @@ export function loadConfig(overrides = {}) {
     androidDeviceToken: requiredSecret("ANDROID_DEVICE_TOKEN"),
     codexControlToken: requiredSecret("CODEX_CONTROL_TOKEN"),
     ownerApprovalCode: requiredSecret("OWNER_APPROVAL_CODE"),
-    wakeHour: integer("WAKE_HOUR", 11, 0, 23),
+    wakeHour: integer("WAKE_HOUR", 6, 0, 23),
+    wakeMinute: integer("WAKE_MINUTE", 30, 0, 59),
     autoStartHour: integer("AUTO_START_HOUR", 1, 0, 23),
     utcOffsetMinutes: integer("UTC_OFFSET_MINUTES", 480, -720, 840),
     accessTokenTtlDays: integer("ACCESS_TOKEN_TTL_DAYS", 90, 1, 365),
@@ -36,4 +37,3 @@ export function loadConfig(overrides = {}) {
   }
   return config;
 }
-

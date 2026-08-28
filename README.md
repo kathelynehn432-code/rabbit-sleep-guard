@@ -14,9 +14,9 @@
 2. 服务器保存“已开启、结束时间、拦截次数”等状态。
 3. Android 无障碍服务每 5 分钟同步一次；打开勾选的应用时会立即向服务器确认，然后遮罩、返回桌面，并可选锁屏。
 4. 每次尝试都会写入服务器记录并增加计数。
-5. 调用 `deactivate_sleep_guard` 或到达设定起床时间后自动解除。
+5. 调用 `deactivate_sleep_guard` 或到达设定起床时间后自动解除；默认结束时间固定为下一个北京时间早上 `06:30`。
 
-凌晨 `01:00–11:00`（默认中国时区）即使忘了在聊天里说晚安，第一次打开受限应用也会自动启动守卫。手动解除后，当晚不会再次自动启动。
+凌晨 `01:00–06:30`（默认中国时区）即使忘了在聊天里说晚安，第一次打开受限应用也会自动启动守卫。手动解除后，当晚不会再次自动启动。
 
 ## 服务器部署
 
@@ -35,6 +35,8 @@ PUBLIC_BASE_URL=https://sleep.example.com
 ANDROID_DEVICE_TOKEN=一段随机值
 CODEX_CONTROL_TOKEN=另一段随机值
 OWNER_APPROVAL_CODE=第三段随机值
+WAKE_HOUR=6
+WAKE_MINUTE=30
 ```
 
 启动并检查：
@@ -142,3 +144,16 @@ node --test
 - `auth.json`：OAuth 客户端、授权码摘要与访问令牌摘要。
 
 密钥本身只存在 `.env`。OAuth 访问令牌和授权码在磁盘中仅保存 SHA-256 摘要。
+
+## 公开仓库与分享
+
+仓库中的睡眠守卫服务器地址均使用 `sleep.example.com` 示例值，APK 也只带这个输入框占位提示，不包含部署者的服务器地址或令牌。朋友部署时需要自行复制 `server/.env.example`，填写自己的 HTTPS 域名，并独立生成三枚密钥。
+
+提交或发布前建议运行：
+
+```bash
+git status --short --ignored
+git grep -nE 'ANDROID_DEVICE_TOKEN|CODEX_CONTROL_TOKEN|OWNER_APPROVAL_CODE'
+```
+
+确认真实的 `.env`、`server/data/`、`artifacts/`、APK、签名文件仍显示为忽略项，搜索结果中的密钥只来自变量名、示例占位值或文档说明。GitHub Actions 工作流不读取部署密钥；它生成的调试 APK 不包含服务器配置。
