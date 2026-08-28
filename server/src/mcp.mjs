@@ -1,8 +1,9 @@
 import { bearer, json, readJson, sameSecret } from "./http-utils.mjs";
 import { publicState } from "./guard-state.mjs";
 
-const PROTOCOL_VERSIONS = new Set(["2025-06-18", "2025-03-26"]);
-const DEFAULT_PROTOCOL_VERSION = "2025-03-26";
+const PROTOCOL_VERSIONS = new Set(["2025-11-25", "2025-06-18", "2025-03-26"]);
+const DEFAULT_PROTOCOL_VERSION = "2025-11-25";
+const OAUTH_SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["sleep_guard:write"] }];
 
 const tools = [
   {
@@ -16,6 +17,8 @@ const tools = [
       },
       additionalProperties: false,
     },
+    securitySchemes: OAUTH_SECURITY_SCHEMES,
+    _meta: { securitySchemes: OAUTH_SECURITY_SCHEMES },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
@@ -23,6 +26,8 @@ const tools = [
     title: "解除兔酱睡眠守卫",
     description: "当使用者明确说早安、已经起床，或明确要求解除睡眠守卫时调用。不要因为普通聊天或查询而解除。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    securitySchemes: OAUTH_SECURITY_SCHEMES,
+    _meta: { securitySchemes: OAUTH_SECURITY_SCHEMES },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
@@ -30,6 +35,8 @@ const tools = [
     title: "查询兔酱睡眠守卫",
     description: "查询守卫是否开启、今晚拦截次数、开始时间和结束时间。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    securitySchemes: OAUTH_SECURITY_SCHEMES,
+    _meta: { securitySchemes: OAUTH_SECURITY_SCHEMES },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
 ];

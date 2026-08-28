@@ -89,6 +89,31 @@ test("static bearer token gives server Codex access to MCP", async () => {
   }
 });
 
+test("origin URL remains a ChatGPT-compatible MCP transport alias", async () => {
+  const context = await fixture();
+  try {
+    const response = await fetch(`${context.url}/`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${context.config.codexControlToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          clientInfo: { name: "openai-mcp (ChatGPT)", version: "1.0.0" },
+          capabilities: {},
+        },
+      }),
+    });
+    assert.equal(response.status, 200);
+    const initialized = await response.json();
+    assert.equal(initialized.result.protocolVersion, "2025-11-25");
+  } finally {
+    await close(context.server);
+  }
+});
+
 test("MCP without a token advertises OAuth resource metadata", async () => {
   const context = await fixture();
   try {
@@ -163,7 +188,12 @@ test("OAuth DCR and PKCE authorize an official-client MCP session", async () => 
       body: JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/list", params: {} }),
     });
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).result.tools.length, 3);
+    const listed = await response.json();
+    assert.equal(listed.result.tools.length, 3);
+    assert.deepEqual(listed.result.tools[0].securitySchemes, [
+      { type: "oauth2", scopes: ["sleep_guard:write"] },
+    ]);
+    assert.deepEqual(listed.result.tools[0]._meta.securitySchemes, listed.result.tools[0].securitySchemes);
   } finally {
     await close(context.server);
   }

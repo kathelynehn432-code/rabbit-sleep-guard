@@ -28,7 +28,10 @@ export async function createSleepGuardServer(config) {
       if (request.method === "GET" && url.pathname === "/oauth/authorize") return await oauth.authorize(url, response);
       if (url.pathname === "/oauth/approve") return await oauth.approve(request, response);
       if (url.pathname === "/oauth/token") return await oauth.exchange(request, response);
-      if (url.pathname === "/mcp") return await handleMcp(request, response, guard, oauth, config);
+      // ChatGPT keeps using the exact connection URL as the MCP transport URL.
+      // Accept the origin as a compatibility alias so an existing connection
+      // created without the documented `/mcp` suffix can still initialize.
+      if (["/", "/mcp"].includes(url.pathname)) return await handleMcp(request, response, guard, oauth, config);
 
       if (url.pathname.startsWith("/api/device/")) {
         if (!sameSecret(bearer(request), config.androidDeviceToken)) return json(response, 401, { ok: false, error: "unauthorized" });
