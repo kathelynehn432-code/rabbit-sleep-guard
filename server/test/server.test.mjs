@@ -52,11 +52,47 @@ test("device and server control APIs share one state", async () => {
     const caught = await response.json();
     assert.equal(caught.active, true);
     assert.equal(caught.attempts, 1);
+    assert.equal(caught.unlocks_revoked, false);
+
+    response = await fetch(`${context.url}/api/device/event`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${context.config.androidDeviceToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ event: "temporary_unlock_requested", app_name: "小红书" }),
+    });
+    const requested = await response.json();
+    assert.equal(requested.unlock_request_count, 1);
+    assert.equal(requested.ignored, false);
+
+    for (let attempt = 2; attempt <= 3; attempt += 1) {
+      response = await fetch(`${context.url}/api/device/event`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${context.config.androidDeviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ event: "blocked_app_opened", app_name: "小红书" }),
+      });
+    }
+    const revoked = await response.json();
+    assert.equal(revoked.attempts, 3);
+    assert.equal(revoked.stage, "refused_sleep");
+    assert.equal(revoked.unlocks_revoked, false);
+
+    for (let request = 2; request <= 3; request += 1) {
+      response = await fetch(`${context.url}/api/device/event`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${context.config.androidDeviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ event: "temporary_unlock_requested", app_name: "小红书" }),
+      });
+    }
+    const thirdRequest = await response.json();
+    assert.equal(thirdRequest.unlock_request_count, 3);
+    assert.equal(thirdRequest.unlocks_revoked, true);
 
     response = await fetch(`${context.url}/api/control/status`, {
       headers: { authorization: `Bearer ${context.config.codexControlToken}` },
     });
-    assert.equal((await response.json()).attempts, 1);
+    const status = await response.json();
+    assert.equal(status.attempts, 3);
+    assert.equal(status.unlock_request_count, 3);
+    assert.equal(status.unlocks_revoked, true);
   } finally {
     await close(context.server);
   }

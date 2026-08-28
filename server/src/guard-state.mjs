@@ -2,12 +2,15 @@ const EVENT_NAMES = new Set([
   "sleep_guard_started",
   "sleep_guard_ended",
   "blocked_app_opened",
+  "temporary_unlock_requested",
 ]);
 
 export function emptyState(now = new Date().toISOString()) {
   return {
     active: false,
     attempts: 0,
+    unlock_request_count: 0,
+    unlocks_revoked: false,
     session_id: null,
     started_at: null,
     ends_at: null,
@@ -85,6 +88,8 @@ export function applyGuardEvent(previous, payload, receivedAt, config) {
       state: {
         active: true,
         attempts: 0,
+        unlock_request_count: 0,
+        unlocks_revoked: false,
         session_id: crypto.randomUUID(),
         started_at: receivedAt,
         ends_at: normalizeEnd(payload.ends_at, now, config),
@@ -111,6 +116,32 @@ export function applyGuardEvent(previous, payload, receivedAt, config) {
     };
   }
 
+  if (payload.event === "temporary_unlock_requested") {
+    const revoked = Boolean(state.unlocks_revoked);
+    if (!state.active || revoked) {
+      state.unlocks_revoked = revoked;
+      state.updated_at = receivedAt;
+      return {
+        state,
+        ignored: true,
+        auto_started: false,
+        stage: revoked ? "refused_sleep" : "inactive",
+      };
+    }
+    const unlockRequestCount = Math.min(Number(state.unlock_request_count ?? 0) + 1, 999);
+    return {
+      state: {
+        ...state,
+        unlock_request_count: unlockRequestCount,
+        unlocks_revoked: unlockRequestCount >= 3,
+        updated_at: receivedAt,
+      },
+      ignored: false,
+      auto_started: false,
+      stage: state.attempts === 1 ? "first_warning" : state.attempts === 2 ? "locked" : "refused_sleep",
+    };
+  }
+
   if (!state.active) {
     const suppressed = state.auto_start_suppressed_until
       && Date.parse(state.auto_start_suppressed_until) > now.getTime();
@@ -119,6 +150,8 @@ export function applyGuardEvent(previous, payload, receivedAt, config) {
         state: {
           active: true,
           attempts: 1,
+          unlock_request_count: 0,
+          unlocks_revoked: false,
           session_id: crypto.randomUUID(),
           started_at: receivedAt,
           ends_at: normalizeEnd(payload.ends_at, now, config),
@@ -182,6 +215,8 @@ export class GuardService {
         source: cleanText(source || payload.source, 64) ?? "unknown",
         app_name: cleanText(payload.app_name, 80),
         attempts: transition.state.attempts,
+        unlock_request_count: Number(transition.state.unlock_request_count ?? 0),
+        unlocks_revoked: Boolean(transition.state.unlocks_revoked),
         active: transition.state.active,
         stage: transition.stage,
         ignored: transition.ignored,
@@ -199,6 +234,8 @@ export function publicState(state) {
   return {
     active: Boolean(state?.active) && (!state?.ends_at || Date.parse(state.ends_at) > Date.now()),
     attempts: Number(state?.attempts ?? 0),
+    unlock_request_count: Number(state?.unlock_request_count ?? 0),
+    unlocks_revoked: Boolean(state?.unlocks_revoked),
     session_id: state?.session_id ?? null,
     started_at: state?.started_at ?? null,
     ends_at: state?.ends_at ?? null,

@@ -9,7 +9,7 @@ const tools = [
   {
     name: "activate_sleep_guard",
     title: "开启兔酱睡眠守卫",
-    description: "当使用者明确说晚安、准备睡觉，或要求开始管手机时调用。应在回复最终晚安之前开启。省略 ends_at 时固定在下一个北京时间早上 06:30 自动解除；只有使用者当晚另行指定结束时间时才传 ends_at。",
+    description: "无需等待固定的“晚安”口令。结合当前对话自主判断：当使用者表达准备睡觉、要休息、困了要放下手机、结束今晚活动，或要求开始管手机时调用；应在回复最终道别或哄睡内容之前开启。普通闲聊中偶然提到睡眠不触发。省略 ends_at 时固定在下一个北京时间早上 06:30 自动解除；只有使用者当晚另行指定结束时间时才传 ends_at。",
     inputSchema: {
       type: "object",
       properties: {
@@ -68,7 +68,9 @@ async function callTool(name, args, guard, source) {
   if (name === "get_sleep_guard_status") {
     const state = publicState(await guard.status());
     return textResult(
-      state.active ? `睡眠守卫正在运行，已拦截 ${state.attempts} 次。` : `睡眠守卫当前未开启，最近记录 ${state.attempts} 次。`,
+      state.active
+        ? `睡眠守卫正在运行，已拦截 ${state.attempts} 次，临时解锁申请 ${state.unlock_request_count} 次${state.unlocks_revoked ? "，申请资格已取消" : ""}。`
+        : `睡眠守卫当前未开启，最近记录 ${state.attempts} 次。`,
       state,
     );
   }
@@ -84,8 +86,8 @@ async function handleMessage(message, guard, source) {
     return result(id, {
       protocolVersion: PROTOCOL_VERSIONS.has(requested) ? requested : DEFAULT_PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "rabbit-sleep-guard", version: "0.1.0" },
-      instructions: "使用者明确说晚安或准备睡觉时，先调用 activate_sleep_guard，默认不传 ends_at，由服务器锁到下一个北京时间早上 06:30；只有使用者当晚另行指定时间时才传 ends_at。明确说早安、已起床或要求解除时调用 deactivate_sleep_guard；询问守卫或次数时调用 get_sleep_guard_status。不要自行解除。",
+      serverInfo: { name: "rabbit-sleep-guard", version: "0.2.0" },
+      instructions: "不要求使用者说固定的“晚安”。请结合对话自主判断：当使用者已经表达准备睡觉、要休息、困了要放下手机、结束今晚活动或希望被管住手机时，先调用 activate_sleep_guard，再回复最终道别或哄睡内容；普通闲聊中偶然提到睡眠不触发。默认不传 ends_at，由服务器锁到下一个北京时间早上 06:30；只有使用者当晚另行指定时间时才传 ends_at。明确说早安、已起床或要求解除时调用 deactivate_sleep_guard；询问守卫、次数或临时解锁资格时调用 get_sleep_guard_status。不要自行解除。",
     });
   }
   if (message.method === "ping") return result(id, {});

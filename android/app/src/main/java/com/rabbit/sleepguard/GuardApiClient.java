@@ -22,14 +22,22 @@ public final class GuardApiClient {
         public final boolean active;
         public final boolean ignored;
         public final int attempts;
+        public final int unlockRequestCount;
+        public final boolean unlocksRevoked;
+        public final String stage;
         public final String endsAt;
         public final String error;
 
-        Result(boolean requestOk, boolean active, boolean ignored, int attempts, String endsAt, String error) {
+        Result(boolean requestOk, boolean active, boolean ignored, int attempts,
+               int unlockRequestCount, boolean unlocksRevoked, String stage,
+               String endsAt, String error) {
             this.requestOk = requestOk;
             this.active = active;
             this.ignored = ignored;
             this.attempts = attempts;
+            this.unlockRequestCount = unlockRequestCount;
+            this.unlocksRevoked = unlocksRevoked;
+            this.stage = stage;
             this.endsAt = endsAt;
             this.error = error;
         }
@@ -67,6 +75,18 @@ public final class GuardApiClient {
         request("POST", "/api/device/event", body, callback);
     }
 
+    public void requestTemporaryUnlock(String appName, Callback callback) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("event", "temporary_unlock_requested");
+            body.put("app_name", appName);
+            body.put("source", "android_accessibility");
+            body.put("request_id", java.util.UUID.randomUUID().toString());
+        } catch (Exception ignored) {
+        }
+        request("POST", "/api/device/event", body, callback);
+    }
+
     private void event(String event, String endsAt, Callback callback) {
         JSONObject body = new JSONObject();
         try {
@@ -83,7 +103,7 @@ public final class GuardApiClient {
         NETWORK.execute(() -> {
             Result result;
             if (!preferences.configured()) {
-                result = new Result(false, false, false, 0, "", "请先填写 HTTPS 服务器地址和设备令牌");
+                result = new Result(false, false, false, 0, 0, false, "inactive", "", "请先填写 HTTPS 服务器地址和设备令牌");
             } else {
                 result = execute(method, path, body);
             }
@@ -121,14 +141,28 @@ public final class GuardApiClient {
             boolean ok = code >= 200 && code < 300 && json.optBoolean("ok", true);
             boolean active = json.optBoolean("active", false);
             int attempts = json.optInt("attempts", 0);
+            int unlockRequestCount = json.optInt("unlock_request_count", 0);
+            boolean unlocksRevoked = json.optBoolean("unlocks_revoked", false);
+            String stage = json.optString("stage", active ? "armed" : "inactive");
             String endsAt = json.optString("ends_at", "");
             boolean ignored = json.optBoolean("ignored", false);
-            if (ok) preferences.updateState(active, attempts, endsAt);
-            return new Result(ok, active, ignored, attempts, endsAt, ok ? "" : json.optString("error", "HTTP " + code));
+            if (ok) preferences.updateState(active, attempts, unlockRequestCount, unlocksRevoked, endsAt);
+            return new Result(ok, active, ignored, attempts, unlockRequestCount, unlocksRevoked,
+                    stage, endsAt, ok ? "" : json.optString("error", "HTTP " + code));
         } catch (Exception error) {
-            return new Result(false, preferences.cachedActive(), false, preferences.attempts(), preferences.endsAt(), error.getClass().getSimpleName());
+            int attempts = preferences.attempts();
+            return new Result(false, preferences.cachedActive(), false, attempts,
+                    preferences.unlockRequestCount(), preferences.unlocksRevoked(), stageFor(attempts),
+                    preferences.endsAt(), error.getClass().getSimpleName());
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private static String stageFor(int attempts) {
+        if (attempts <= 0) return "armed";
+        if (attempts == 1) return "first_warning";
+        if (attempts == 2) return "locked";
+        return "refused_sleep";
     }
 }

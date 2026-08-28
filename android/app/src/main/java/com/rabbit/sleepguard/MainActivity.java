@@ -35,6 +35,9 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
+    public static final String EXTRA_UNLOCK_REQUESTED = "unlock_requested";
+    public static final String EXTRA_UNLOCK_REQUEST_ERROR = "unlock_request_error";
+
     private GuardPreferences preferences;
     private GuardApiClient api;
     private EditText serverUrl;
@@ -52,6 +55,15 @@ public final class MainActivity extends Activity {
         GuardNotification.createChannels(this);
         requestNotificationPermission();
         setContentView(buildContent());
+        showUnlockRequestResult(getIntent());
+        refreshStatus();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        showUnlockRequestResult(intent);
         refreshStatus();
     }
 
@@ -74,7 +86,7 @@ public final class MainActivity extends Activity {
         TextView title = text("兔酱睡眠守卫", 30, Color.rgb(23, 30, 50));
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
-        TextView intro = text("官端或服务器里的 Codex 说“开启睡眠守卫”后，这台手机会拦住你选中的应用。", 16, Color.rgb(78, 88, 116));
+        TextView intro = text("官端或服务器里的 Codex 判断你准备睡觉并开启守卫后，这台手机会拦住选中的应用；不要求固定说“晚安”。", 16, Color.rgb(78, 88, 116));
         intro.setPadding(0, dp(8), 0, dp(20));
         root.addView(intro);
 
@@ -103,7 +115,7 @@ public final class MainActivity extends Activity {
         root.addView(accessibility, matchWrap());
 
         lockScreen = new Switch(this);
-        lockScreen.setText("拦截后直接锁屏（可选）");
+        lockScreen.setText("点“回去睡觉”后熄屏（可选）");
         lockScreen.setTextSize(16f);
         lockScreen.setChecked(preferences.lockScreen());
         lockScreen.setOnCheckedChangeListener((button, checked) -> preferences.setLockScreen(checked));
@@ -133,6 +145,10 @@ public final class MainActivity extends Activity {
         Button saveApps = button("保存应用名单");
         saveApps.setOnClickListener(view -> saveApps());
         root.addView(saveApps, spaced());
+
+        addHeading(root, "守卫拦截规则");
+        TextView rules = text("第一次：first warning\n第二次：locked\n第三次及以后：refused sleep\n当晚第三次临时解锁申请写入后，申请按钮消失。重复开启守卫不会清掉记录。", 14, Color.rgb(93, 102, 128));
+        root.addView(rules, matchWrap());
 
         addHeading(root, "4. 手动测试");
         LinearLayout actions = new LinearLayout(this);
@@ -223,7 +239,11 @@ public final class MainActivity extends Activity {
         String service = accessibilityEnabled() ? "无障碍已开启" : "无障碍未开启";
         String end = formatEnd(result.endsAt);
         if (result.active) {
-            status.setText("守卫开启 · 已拦 " + result.attempts + " 次" + (end.isEmpty() ? "" : " · " + end + "结束") + "\n" + service);
+            String unlock = result.unlocksRevoked
+                    ? " · 临时解锁已取消"
+                    : " · 临时解锁申请 " + result.unlockRequestCount + " 次";
+            status.setText("守卫开启 · 已拦 " + result.attempts + " 次" + unlock
+                    + (end.isEmpty() ? "" : " · " + end + "结束") + "\n" + service);
             status.setBackgroundColor(Color.rgb(71, 122, 96));
         } else {
             status.setText("守卫未开启\n" + service);
@@ -261,6 +281,19 @@ public final class MainActivity extends Activity {
         intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component);
         intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "仅在睡眠守卫拦截受限应用时锁定屏幕。");
         startActivity(intent);
+    }
+
+    private void showUnlockRequestResult(Intent intent) {
+        if (intent == null || !intent.hasExtra(EXTRA_UNLOCK_REQUESTED)) return;
+        boolean recorded = intent.getBooleanExtra(EXTRA_UNLOCK_REQUESTED, false);
+        String error = intent.getStringExtra(EXTRA_UNLOCK_REQUEST_ERROR);
+        intent.removeExtra(EXTRA_UNLOCK_REQUESTED);
+        intent.removeExtra(EXTRA_UNLOCK_REQUEST_ERROR);
+        if (recorded) {
+            toast("临时解锁申请已记录；今晚的偷开次数不会清零");
+        } else {
+            toast("申请暂未同步：" + (error == null || error.isEmpty() ? "网络连接失败" : error));
+        }
     }
 
     private void requestNotificationPermission() {

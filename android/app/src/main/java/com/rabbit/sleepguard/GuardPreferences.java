@@ -15,6 +15,8 @@ public final class GuardPreferences {
     private static final String LOCK_SCREEN = "lock_screen";
     private static final String ACTIVE = "active";
     private static final String ATTEMPTS = "attempts";
+    private static final String UNLOCK_REQUEST_COUNT = "unlock_request_count";
+    private static final String UNLOCKS_REVOKED = "unlocks_revoked";
     private static final String ENDS_AT = "ends_at";
     private static final String LAST_SYNC = "last_sync";
 
@@ -72,6 +74,14 @@ public final class GuardPreferences {
         return preferences.getInt(ATTEMPTS, 0);
     }
 
+    public int unlockRequestCount() {
+        return preferences.getInt(UNLOCK_REQUEST_COUNT, 0);
+    }
+
+    public boolean unlocksRevoked() {
+        return preferences.getBoolean(UNLOCKS_REVOKED, false);
+    }
+
     public String endsAt() {
         return preferences.getString(ENDS_AT, "");
     }
@@ -80,10 +90,13 @@ public final class GuardPreferences {
         return preferences.getLong(LAST_SYNC, 0L);
     }
 
-    public void updateState(boolean active, int attempts, String endsAt) {
+    public void updateState(boolean active, int attempts, int unlockRequestCount,
+                            boolean unlocksRevoked, String endsAt) {
         preferences.edit()
                 .putBoolean(ACTIVE, active)
                 .putInt(ATTEMPTS, attempts)
+                .putInt(UNLOCK_REQUEST_COUNT, unlockRequestCount)
+                .putBoolean(UNLOCKS_REVOKED, unlocksRevoked)
                 .putString(ENDS_AT, endsAt == null ? "" : endsAt)
                 .putLong(LAST_SYNC, System.currentTimeMillis())
                 .apply();
@@ -93,4 +106,3 @@ public final class GuardPreferences {
         return serverUrl().startsWith("https://") && deviceToken().length() >= 24;
     }
 }
-

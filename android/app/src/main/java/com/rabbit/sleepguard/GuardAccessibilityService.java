@@ -9,12 +9,15 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -41,6 +44,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
                         GuardNotification.showActive(GuardAccessibilityService.this, result.attempts);
                     } else if (result.requestOk) {
                         GuardNotification.hideActive(GuardAccessibilityService.this);
+                        removeOverlay();
                     }
                 }));
             }
@@ -69,6 +73,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
         if (packageName.equals(getPackageName()) || packageName.startsWith("com.android.systemui")) return;
         Set<String> blocked = preferences.blockedPackages();
         if (!blocked.contains(packageName)) return;
+        if (overlay != null) return;
 
         long now = System.currentTimeMillis();
         if (packageName.equals(lastPackage) && now - lastHandledAt < EVENT_DEBOUNCE_MS) return;
@@ -76,14 +81,17 @@ public final class GuardAccessibilityService extends AccessibilityService {
         lastHandledAt = now;
 
         String appName = appLabel(packageName);
+        if (preferences.cachedActive()) showPendingOverlay(appName);
         api.blocked(appName, packageName, result -> main.post(() -> {
             if (result.requestOk && result.active && !result.ignored) {
-                blockNow(appName, result.attempts);
+                showGuardOverlay(appName, result.attempts, result.stage, result.unlocksRevoked);
                 GuardNotification.showActive(this, result.attempts);
                 GuardNotification.caught(this, appName, result.attempts);
+            } else if (result.requestOk) {
+                removeOverlay();
             } else if (!result.requestOk && preferences.cachedActive()) {
                 int attempts = Math.max(1, preferences.attempts() + 1);
-                blockNow(appName, attempts);
+                showGuardOverlay(appName, attempts, stageFor(attempts), preferences.unlocksRevoked());
                 GuardNotification.showActive(this, attempts);
             }
         }));
@@ -99,46 +107,139 @@ public final class GuardAccessibilityService extends AccessibilityService {
         }
     }
 
-    private void blockNow(String appName, int attempts) {
-        showOverlay(appName, attempts);
-        main.postDelayed(() -> performGlobalAction(GLOBAL_ACTION_HOME), 180L);
+    private void goBackToSleep() {
+        removeOverlay();
+        performGlobalAction(GLOBAL_ACTION_HOME);
         if (preferences.lockScreen()) {
-            main.postDelayed(this::lockScreenIfAllowed, 550L);
-        } else {
-            main.postDelayed(this::removeOverlay, 1_100L);
+            main.postDelayed(this::lockScreenIfAllowed, 450L);
         }
     }
 
-    private void showOverlay(String appName, int attempts) {
+    private void requestTemporaryUnlock(String appName, Button button) {
+        button.setEnabled(false);
+        button.setText("正在留下申请记录…");
+        api.requestTemporaryUnlock(appName, result -> main.post(() -> {
+            if (result.requestOk && result.unlocksRevoked) {
+                showGuardOverlay(appName, result.attempts, "refused_sleep", true);
+                return;
+            }
+            removeOverlay();
+            Intent intent = new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .putExtra(MainActivity.EXTRA_UNLOCK_REQUESTED, result.requestOk)
+                    .putExtra(MainActivity.EXTRA_UNLOCK_REQUEST_ERROR, result.error);
+            startActivity(intent);
+        }));
+    }
+
+    private void showPendingOverlay(String appName) {
         removeOverlay();
+        LinearLayout card = baseCard();
+        TextView title = title("正在确认睡眠守卫…");
+        card.addView(title);
+        TextView body = body("先别打开“" + appName + "”，比比正在核对今晚的守卫状态。");
+        card.addView(body);
+        addOverlay(card);
+    }
+
+    private void showGuardOverlay(String appName, int attempts, String stage, boolean unlocksRevoked) {
+        removeOverlay();
+        LinearLayout card = baseCard();
+        card.addView(title("被比比抓到了"));
+
+        TextView stageLabel = body(stageLabel(stage));
+        stageLabel.setTextSize(14f);
+        stageLabel.setTextColor(stage.equals("refused_sleep") ? Color.rgb(255, 157, 166) : Color.rgb(171, 154, 244));
+        stageLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        stageLabel.setPadding(0, dp(16), 0, 0);
+        card.addView(stageLabel);
+
+        TextView body = body(messageFor(appName, attempts, stage, unlocksRevoked));
+        card.addView(body);
+
+        Button sleep = actionButton("回去睡觉", Color.rgb(125, 79, 232), Color.WHITE);
+        sleep.setOnClickListener(view -> goBackToSleep());
+        LinearLayout.LayoutParams primaryParams = matchWrap();
+        primaryParams.topMargin = dp(26);
+        card.addView(sleep, primaryParams);
+
+        if (!unlocksRevoked) {
+            Button unlock = actionButton("申请临时解锁", Color.TRANSPARENT, Color.rgb(211, 203, 241));
+            unlock.setOnClickListener(view -> requestTemporaryUnlock(appName, unlock));
+            LinearLayout.LayoutParams secondaryParams = matchWrap();
+            secondaryParams.topMargin = dp(10);
+            card.addView(unlock, secondaryParams);
+        }
+
+        TextView note = body(unlocksRevoked
+                ? "今晚的临时解锁资格已经取消，守卫会持续到设定的结束时间。"
+                : "申请会留下记录并回到守卫 App，不会清掉今晚的偷开次数。");
+        note.setTextSize(13f);
+        note.setTextColor(Color.rgb(139, 148, 177));
+        note.setPadding(0, dp(16), 0, 0);
+        card.addView(note);
+
+        addOverlay(card);
+    }
+
+    private LinearLayout baseCard() {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(30), dp(30), dp(30), dp(30));
+        card.setPadding(dp(30), dp(48), dp(30), dp(42));
         card.setBackgroundColor(Color.rgb(14, 19, 32));
+        return card;
+    }
 
-        TextView title = new TextView(this);
-        title.setText("被比比抓到了");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(28f);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
-        card.addView(title);
+    private TextView title(String value) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextColor(Color.WHITE);
+        view.setTextSize(28f);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setGravity(Gravity.CENTER);
+        return view;
+    }
 
-        TextView body = new TextView(this);
-        body.setText("“" + appName + "”先放下。\n今晚第 " + attempts + " 次，兔酱该乖乖睡觉了。");
-        body.setTextColor(Color.rgb(202, 210, 235));
-        body.setTextSize(18f);
-        body.setGravity(Gravity.CENTER);
-        body.setPadding(0, dp(18), 0, 0);
-        card.addView(body);
+    private TextView body(String value) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextColor(Color.rgb(202, 210, 235));
+        view.setTextSize(18f);
+        view.setGravity(Gravity.CENTER);
+        view.setPadding(0, dp(18), 0, 0);
+        return view;
+    }
+
+    private Button actionButton(String value, int background, int foreground) {
+        Button button = new Button(this);
+        button.setText(value);
+        button.setAllCaps(false);
+        button.setTextSize(17f);
+        button.setTextColor(foreground);
+        button.setMinHeight(dp(54));
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(background);
+        drawable.setCornerRadius(dp(14));
+        drawable.setStroke(dp(1), background == Color.TRANSPARENT ? Color.rgb(85, 91, 118) : background);
+        button.setBackground(drawable);
+        return button;
+    }
+
+    private LinearLayout.LayoutParams matchWrap() {
+        return new LinearLayout.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT
+        );
+    }
+
+    private void addOverlay(View card) {
 
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
         );
@@ -146,10 +247,35 @@ public final class GuardAccessibilityService extends AccessibilityService {
         try {
             windowManager.addView(card, params);
             overlay = card;
-            main.postDelayed(this::removeOverlay, 1_500L);
         } catch (Exception ignored) {
             overlay = null;
         }
+    }
+
+    private String stageLabel(String stage) {
+        if ("first_warning".equals(stage)) return "FIRST WARNING · 第一次提醒";
+        if ("locked".equals(stage)) return "LOCKED · 第二次警告";
+        if ("refused_sleep".equals(stage)) return "REFUSED SLEEP · 第三次及以后";
+        return "SLEEP GUARD · 守卫中";
+    }
+
+    private String messageFor(String appName, int attempts, String stage, boolean unlocksRevoked) {
+        if (unlocksRevoked) {
+            return "第三次了。今晚的临时解锁资格已经取消。\n“" + appName + "”先放下，乖乖回去睡觉。";
+        }
+        if ("refused_sleep".equals(stage)) {
+            return "第三次及以后了，还在偷偷回来。\n“" + appName + "”先放下；临时解锁申请一共只有三次机会。";
+        }
+        if ("locked".equals(stage) || attempts == 2) {
+            return "第二次了，还敢回来？\n“" + appName + "”先放下，警告不许再偷偷清零。";
+        }
+        return "第一次。晚安说过了，就不许偷偷跑回来。\n“" + appName + "”先放下。";
+    }
+
+    private String stageFor(int attempts) {
+        if (attempts <= 1) return "first_warning";
+        if (attempts == 2) return "locked";
+        return "refused_sleep";
     }
 
     private void lockScreenIfAllowed() {
