@@ -41,10 +41,33 @@ jobs:
         shell: bash
         run: |
           version="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          version_code="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' android/app/build.gradle.kts | head -n 1)"
           test -n "$version"
+          test -n "$version_code"
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/rabbit-sleep-guard-v${version}.apk"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+      - name: Verify package, version, and fixed signature
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/rabbit-sleep-guard-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          apk="dist/rabbit-sleep-guard-v${{ steps.package.outputs.version }}.apk"
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -x "$build_tools/apksigner"
+          test -x "$build_tools/aapt"
+          "$build_tools/apksigner" verify --verbose "$apk"
+          badging="$("$build_tools/aapt" dump badging "$apk" | head -n 1)"
+          grep -F "package: name='com.rabbit.sleepguard'" <<< "$badging"
+          grep -F "versionCode='${{ steps.package.outputs.version_code }}'" <<< "$badging"
+          grep -F "versionName='${{ steps.package.outputs.version }}'" <<< "$badging"
+          actual_digest="$("$build_tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          expected_digest="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | openssl dgst -sha256 -binary | xxd -p -c 256)"
+          test -n "$actual_digest"
+          test "$actual_digest" = "$expected_digest"
       - name: Upload installable APK
         uses: actions/upload-artifact@v7
         with:
