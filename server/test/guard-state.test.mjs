@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { applyGuardEvent, emptyState, publicState, shouldAutoStart } from "../src/guard-state.mjs";
+
+const config = { wakeHour: 11, autoStartHour: 1, utcOffsetMinutes: 480 };
+
+test("start, count, and stop preserve one session", () => {
+  let transition = applyGuardEvent(null, { event: "sleep_guard_started", ends_at: "2026-08-29T03:00:00.000Z" }, "2026-08-28T14:00:00.000Z", config);
+  assert.equal(transition.state.active, true);
+  assert.equal(transition.state.attempts, 0);
+  const session = transition.state.session_id;
+
+  transition = applyGuardEvent(transition.state, { event: "sleep_guard_started" }, "2026-08-28T14:01:00.000Z", config);
+  assert.equal(transition.state.session_id, session);
+  transition = applyGuardEvent(transition.state, { event: "blocked_app_opened" }, "2026-08-28T14:02:00.000Z", config);
+  assert.equal(transition.state.attempts, 1);
+  assert.equal(transition.stage, "first_warning");
+  transition = applyGuardEvent(transition.state, { event: "blocked_app_opened" }, "2026-08-28T14:03:00.000Z", config);
+  assert.equal(transition.stage, "locked");
+  transition = applyGuardEvent(transition.state, { event: "sleep_guard_ended" }, "2026-08-28T14:04:00.000Z", config);
+  assert.equal(transition.state.active, false);
+});
+
+test("late-night app open auto-starts and a manual wake suppresses it", () => {
+  assert.equal(shouldAutoStart(new Date("2026-08-28T17:00:00.000Z"), config), true);
+  let transition = applyGuardEvent(emptyState("2026-08-28T17:00:00.000Z"), { event: "blocked_app_opened" }, "2026-08-28T17:00:00.000Z", config);
+  assert.equal(transition.auto_started, true);
+  assert.equal(transition.state.attempts, 1);
+  transition = applyGuardEvent(transition.state, { event: "sleep_guard_ended" }, "2026-08-28T18:00:00.000Z", config);
+  transition = applyGuardEvent(transition.state, { event: "blocked_app_opened" }, "2026-08-28T19:00:00.000Z", config);
+  assert.equal(transition.ignored, true);
+  assert.equal(transition.auto_started, false);
+});
+
+test("publicState treats expired sessions as inactive", () => {
+  const state = emptyState();
+  state.active = true;
+  state.ends_at = "2000-01-01T00:00:00.000Z";
+  assert.equal(publicState(state).active, false);
+});
+

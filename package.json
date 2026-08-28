@@ -1,0 +1,10 @@
+{
+  "name": "sleepy-dog-lock-android",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npm --prefix server test",
+    "start": "npm --prefix server start"
+  }
+}
+

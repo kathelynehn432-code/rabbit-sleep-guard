@@ -1,0 +1,96 @@
+package com.rabbit.sleepguard;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
+public final class GuardPreferences {
+    private static final String FILE = "rabbit_sleep_guard";
+    private static final String SERVER_URL = "server_url";
+    private static final String DEVICE_TOKEN = "device_token";
+    private static final String BLOCKED_PACKAGES = "blocked_packages";
+    private static final String LOCK_SCREEN = "lock_screen";
+    private static final String ACTIVE = "active";
+    private static final String ATTEMPTS = "attempts";
+    private static final String ENDS_AT = "ends_at";
+    private static final String LAST_SYNC = "last_sync";
+
+    private final SharedPreferences preferences;
+
+    public GuardPreferences(Context context) {
+        preferences = context.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+    }
+
+    public String serverUrl() {
+        return preferences.getString(SERVER_URL, "").replaceAll("/+$", "");
+    }
+
+    public String deviceToken() {
+        return preferences.getString(DEVICE_TOKEN, "");
+    }
+
+    public void saveConnection(String serverUrl, String deviceToken) {
+        preferences.edit()
+                .putString(SERVER_URL, serverUrl.trim().replaceAll("/+$", ""))
+                .putString(DEVICE_TOKEN, deviceToken.trim())
+                .apply();
+    }
+
+    public Set<String> blockedPackages() {
+        return Collections.unmodifiableSet(new HashSet<>(
+                preferences.getStringSet(BLOCKED_PACKAGES, Collections.emptySet())
+        ));
+    }
+
+    public void saveBlockedPackages(Set<String> packages) {
+        preferences.edit().putStringSet(BLOCKED_PACKAGES, new HashSet<>(packages)).apply();
+    }
+
+    public boolean lockScreen() {
+        return preferences.getBoolean(LOCK_SCREEN, true);
+    }
+
+    public void setLockScreen(boolean enabled) {
+        preferences.edit().putBoolean(LOCK_SCREEN, enabled).apply();
+    }
+
+    public boolean cachedActive() {
+        if (!preferences.getBoolean(ACTIVE, false)) return false;
+        String end = preferences.getString(ENDS_AT, "");
+        if (end == null || end.isEmpty()) return true;
+        try {
+            return java.time.Instant.parse(end).toEpochMilli() > System.currentTimeMillis();
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    public int attempts() {
+        return preferences.getInt(ATTEMPTS, 0);
+    }
+
+    public String endsAt() {
+        return preferences.getString(ENDS_AT, "");
+    }
+
+    public long lastSync() {
+        return preferences.getLong(LAST_SYNC, 0L);
+    }
+
+    public void updateState(boolean active, int attempts, String endsAt) {
+        preferences.edit()
+                .putBoolean(ACTIVE, active)
+                .putInt(ATTEMPTS, attempts)
+                .putString(ENDS_AT, endsAt == null ? "" : endsAt)
+                .putLong(LAST_SYNC, System.currentTimeMillis())
+                .apply();
+    }
+
+    public boolean configured() {
+        return serverUrl().startsWith("https://") && deviceToken().length() >= 24;
+    }
+}
+

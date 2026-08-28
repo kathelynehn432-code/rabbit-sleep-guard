@@ -1,0 +1,144 @@
+# 兔酱睡眠守卫（Android + 自托管 MCP）
+
+这是 [bella-and-c/sleepy-dog-lock](https://github.com/bella-and-c/sleepy-dog-lock) 的 Android / 自托管实现。它把同一份睡眠守卫状态同时交给：
+
+- Android 手机上的无障碍服务；
+- 服务器中的 Codex（固定 Bearer Token）；
+- ChatGPT 官端或其他支持远程 MCP 的客户端（OAuth 2.1 + PKCE）。
+
+不需要 ntfy、Shizuku、Bark、Firebase 或数据库。服务器只需要 Node.js 22，运行时无第三方 npm 依赖。
+
+## 它实际怎样工作
+
+1. 在 ChatGPT 官端或服务器 Codex 中调用 `activate_sleep_guard`。
+2. 服务器保存“已开启、结束时间、拦截次数”等状态。
+3. Android 无障碍服务每 5 分钟同步一次；打开勾选的应用时会立即向服务器确认，然后遮罩、返回桌面，并可选锁屏。
+4. 每次尝试都会写入服务器记录并增加计数。
+5. 调用 `deactivate_sleep_guard` 或到达设定起床时间后自动解除。
+
+凌晨 `01:00–11:00`（默认中国时区）即使忘了在聊天里说晚安，第一次打开受限应用也会自动启动守卫。手动解除后，当晚不会再次自动启动。
+
+## 服务器部署
+
+要求：Node.js 22、PM2、一个 HTTPS 域名。2 核 2 GB 的小服务器足够。
+
+```bash
+cd server
+cp .env.example .env
+npm run secrets
+```
+
+把 `npm run secrets` 打印的三个值分别填进 `.env`，同时填写真实域名：
+
+```dotenv
+PUBLIC_BASE_URL=https://sleep.example.com
+ANDROID_DEVICE_TOKEN=一段随机值
+CODEX_CONTROL_TOKEN=另一段随机值
+OWNER_APPROVAL_CODE=第三段随机值
+```
+
+启动并检查：
+
+```bash
+pm2 start pm2.config.cjs
+pm2 save
+curl https://sleep.example.com/health
+```
+
+`server/nginx.example.conf` 是 Nginx 反向代理示例。必须使用有效 HTTPS 证书，且不要把 `.env`、`server/data/` 或三个密钥提交到 Git。
+
+## 连接服务器里的 Codex
+
+Codex 可以直接用固定 Token，不需要每次走网页授权。在运行 Codex 的环境中设置：
+
+```bash
+export SLEEP_GUARD_CODEX_TOKEN='复制 CODEX_CONTROL_TOKEN 的值'
+```
+
+在 Codex 的 `config.toml` 中加入：
+
+```toml
+[mcp_servers.rabbit_sleep_guard]
+url = "https://sleep.example.com/mcp"
+bearer_token_env_var = "SLEEP_GUARD_CODEX_TOKEN"
+```
+
+重新打开 Codex 后，应能看到三个工具：
+
+- `activate_sleep_guard`
+- `deactivate_sleep_guard`
+- `get_sleep_guard_status`
+
+服务器上也附带不经过 MCP 的管理命令，便于脚本或排错：
+
+```bash
+SLEEP_GUARD_URL=https://sleep.example.com \
+SLEEP_GUARD_CODEX_TOKEN="$SLEEP_GUARD_CODEX_TOKEN" \
+node server/bin/sleep-guard-control.mjs status
+```
+
+最后一个参数可换成 `start` 或 `stop`。
+
+## 连接 ChatGPT 官端
+
+在 ChatGPT 的开发者模式 / MCP 连接设置中新增远程服务器，地址填写：
+
+```text
+https://sleep.example.com/mcp
+```
+
+官端会自动读取 OAuth 元数据、动态注册客户端并打开授权页。在授权页输入 `.env` 中的 `OWNER_APPROVAL_CODE`。授权成功后，官端与服务器 Codex 操作的是同一份状态。
+
+这套 OAuth 实现包含：动态客户端注册、授权码流程、PKCE S256、短期授权码、90 天访问令牌和服务器所有者口令确认。要撤销全部官端授权，可以停止服务后删除 `server/data/auth.json` 再启动。
+
+## Android 安装与首次设置
+
+Android 8.0 及以上可用。项目的 `minSdk` 是 26，`targetSdk` 是 35。
+
+1. 安装 APK，打开“兔酱睡眠守卫”。
+2. 填写 HTTPS 服务器地址和 `.env` 中的 `ANDROID_DEVICE_TOKEN`，点“保存并测试连接”。
+3. 点“打开无障碍设置”，启用“兔酱睡眠守卫”。这是识别前台应用和执行返回桌面的必要权限。
+4. 如果希望真的熄屏，再点“允许设备管理锁屏”。不授予也能遮罩并返回桌面。
+5. 勾选要拦截的娱乐应用并保存。
+6. 在 vivo / OriginOS 中允许后台运行，关闭该应用的电量优化限制。无障碍服务本身通常可以常驻，但 vivo 的后台管理仍建议放行。
+
+应用不会读取页面文字或输入内容。它只使用无障碍事件里的应用包名，且只处理你主动勾选的包。
+
+5 分钟一次的后台同步约占每月 8,640 次请求，适配 ngrok 免费套餐的请求额度；打开受限应用时的即时确认不依赖下一次后台同步。网络临时不可用且最近一次有效状态为开启时，应用仍按开启状态执行。
+
+## 生成 APK
+
+### GitHub Actions（最省事）
+
+把整个目录推到 GitHub，在 Actions 页手动运行 **Build installable Android APK**。完成后下载 `rabbit-sleep-guard-apk`，其中的 `app-debug.apk` 已使用 Android 调试证书签名，可以直接侧载安装。
+
+### Android Studio
+
+用 Android Studio 打开 `android/` 目录，等待 Gradle 同步后选择 **Build > Build APK(s)**。生成路径：
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+正式长期分发时，应自行创建 release 签名并妥善保存 keystore；调试 APK 更适合仅在自己的手机上安装。
+
+## 本地测试
+
+服务器测试不需要安装依赖：
+
+```bash
+cd server
+node --test
+```
+
+当前覆盖状态启动、计数、解除、凌晨自动启动、过期、Android 与控制 API 共用状态、静态令牌 MCP，以及未授权客户端的 OAuth 发现入口。
+
+## 数据文件
+
+运行后服务器只在 `server/data/` 保存：
+
+- `state.json`：当前守卫状态；
+- `events.jsonl`：事件与拦截次数记录；
+- `auth.json`：OAuth 客户端、授权码摘要与访问令牌摘要。
+
+密钥本身只存在 `.env`。OAuth 访问令牌和授权码在磁盘中仅保存 SHA-256 摘要。

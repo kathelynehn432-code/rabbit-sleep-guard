@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { createSleepGuardServer } from "../src/server.mjs";
+
+const secret = (character) => character.repeat(32);
+
+async function fixture() {
+  const dataDir = await mkdtemp(join(tmpdir(), "sleep-guard-test-"));
+  const config = {
+    port: 0,
+    publicBaseUrl: "http://127.0.0.1",
+    dataDir,
+    androidDeviceToken: secret("a"),
+    codexControlToken: secret("c"),
+    ownerApprovalCode: secret("o"),
+    wakeHour: 11,
+    autoStartHour: 1,
+    utcOffsetMinutes: 480,
+    accessTokenTtlDays: 90,
+  };
+  const { server } = await createSleepGuardServer(config);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  return { server, config, url: `http://127.0.0.1:${address.port}` };
+}
+
+async function close(server) {
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+test("device and server control APIs share one state", async () => {
+  const context = await fixture();
+  try {
+    let response = await fetch(`${context.url}/api/control/activate`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${context.config.codexControlToken}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).active, true);
+
+    response = await fetch(`${context.url}/api/device/event`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${context.config.androidDeviceToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ event: "blocked_app_opened", app_name: "小红书" }),
+    });
+    const caught = await response.json();
+    assert.equal(caught.active, true);
+    assert.equal(caught.attempts, 1);
+
+    response = await fetch(`${context.url}/api/control/status`, {
+      headers: { authorization: `Bearer ${context.config.codexControlToken}` },
+    });
+    assert.equal((await response.json()).attempts, 1);
+  } finally {
+    await close(context.server);
+  }
+});
+
+test("static bearer token gives server Codex access to MCP", async () => {
+  const context = await fixture();
+  try {
+    const headers = { authorization: `Bearer ${context.config.codexControlToken}`, "content-type": "application/json" };
+    let response = await fetch(`${context.url}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    const listed = await response.json();
+    assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
+      "activate_sleep_guard",
+      "deactivate_sleep_guard",
+      "get_sleep_guard_status",
+    ]);
+
+    response = await fetch(`${context.url}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "activate_sleep_guard", arguments: {} } }),
+    });
+    assert.equal((await response.json()).result.structuredContent.active, true);
+  } finally {
+    await close(context.server);
+  }
+});
+
+test("MCP without a token advertises OAuth resource metadata", async () => {
+  const context = await fixture();
+  try {
+    const response = await fetch(`${context.url}/mcp`, { method: "POST", body: "{}" });
+    assert.equal(response.status, 401);
+    assert.match(response.headers.get("www-authenticate"), /oauth-protected-resource/);
+  } finally {
+    await close(context.server);
+  }
+});
+
+test("OAuth DCR and PKCE authorize an official-client MCP session", async () => {
+  const context = await fixture();
+  try {
+    const redirectUri = "http://127.0.0.1/callback";
+    let response = await fetch(`${context.url}/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Official client test",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+    assert.equal(response.status, 201);
+    const client = await response.json();
+
+    const verifier = "v".repeat(64);
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    const authorize = new URL(`${context.url}/oauth/authorize`);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("client_id", client.client_id);
+    authorize.searchParams.set("redirect_uri", redirectUri);
+    authorize.searchParams.set("scope", "sleep_guard:write");
+    authorize.searchParams.set("state", "test-state");
+    authorize.searchParams.set("code_challenge", challenge);
+    authorize.searchParams.set("code_challenge_method", "S256");
+    response = await fetch(authorize);
+    assert.equal(response.status, 200);
+    const page = await response.text();
+    const requestId = page.match(/name="id" value="([^"]+)"/)?.[1];
+    assert.ok(requestId);
+
+    response = await fetch(`${context.url}/oauth/approve`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ id: requestId, approval_code: context.config.ownerApprovalCode }),
+    });
+    assert.equal(response.status, 302);
+    const callback = new URL(response.headers.get("location"));
+    assert.equal(callback.searchParams.get("state"), "test-state");
+
+    response = await fetch(`${context.url}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: callback.searchParams.get("code"),
+        client_id: client.client_id,
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+      }),
+    });
+    assert.equal(response.status, 200);
+    const access = await response.json();
+    assert.equal(access.token_type, "Bearer");
+
+    response = await fetch(`${context.url}/mcp`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${access.access_token}`, "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/list", params: {} }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).result.tools.length, 3);
+  } finally {
+    await close(context.server);
+  }
+});
