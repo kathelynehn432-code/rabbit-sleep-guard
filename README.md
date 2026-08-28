@@ -12,7 +12,7 @@
 
 1. 在 ChatGPT 官端或服务器 Codex 中调用 `activate_sleep_guard`。不要求固定说“晚安”；工具说明会让模型结合“准备睡觉、要休息、放下手机”等对话自行判断。
 2. 服务器保存“已开启、结束时间、拦截次数”等状态。
-3. Android 无障碍服务每 5 分钟同步一次；打开勾选的应用时会立即向服务器确认并显示完整守卫页。守卫页会保持亮屏，只有亲手点“回去睡觉”后才可能按设置熄屏。
+3. Android 无障碍服务每 5 分钟同步一次；打开勾选的应用时会立即向服务器确认并显示完整守卫页。屏幕可以正常超时熄灭；再次按电源键亮屏时仍由守卫页接管，可选择申请临时解锁或回去睡觉。
 4. 偷开依次进入 `first_warning`、`locked`、`refused_sleep`。当晚共有三次“申请临时解锁”机会；第三次申请写入后设置 `unlocks_revoked = true` 并隐藏按钮。
 5. “申请临时解锁”会留下独立的持久记录并回到守卫 App，不会清掉偷开次数；“回去睡觉”才返回桌面，并按设置选择是否熄屏。
 6. 调用 `deactivate_sleep_guard` 或到达设定起床时间后自动解除；默认结束时间固定为下一个北京时间早上 `06:30`。
@@ -113,7 +113,7 @@ Android 8.0 及以上可用。项目的 `minSdk` 是 26，`targetSdk` 是 35。
 
 ### GitHub Actions（最省事）
 
-把整个目录推到 GitHub，在 Actions 页手动运行 **Build installable Android APK**。完成后下载带明确版本号的 `rabbit-sleep-guard-vX.Y.Z` 构建产物，其中同名 APK 已使用 Android 调试证书签名，可以直接侧载安装；App 首页和守卫页底部也会显示实际运行版本。
+仓库维护者先把长期保存的 release keystore 及其密码放进 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 四个 GitHub Actions Secrets。之后每次推送 Android 改动或手动运行 **Build installable Android APK**，都会用同一把固定密钥生成带明确版本号的 `rabbit-sleep-guard-vX.Y.Z`，可直接侧载安装并覆盖后续版本；App 首页和守卫页底部也会显示实际运行版本。
 
 ### Android Studio
 
@@ -123,7 +123,7 @@ Android 8.0 及以上可用。项目的 `minSdk` 是 26，`targetSdk` 是 35。
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-正式长期分发时，应自行创建 release 签名并妥善保存 keystore；调试 APK 更适合仅在自己的手机上安装。
+本地构建 release APK 时，通过 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 环境变量传入同一套签名配置；keystore 和密码不进入仓库。
 
 ## 本地测试
 
@@ -157,4 +157,4 @@ git status --short --ignored
 git grep -nE 'ANDROID_DEVICE_TOKEN|CODEX_CONTROL_TOKEN|OWNER_APPROVAL_CODE'
 ```
 
-确认真实的 `.env`、`server/data/`、`artifacts/`、APK、签名文件仍显示为忽略项，搜索结果中的密钥只来自变量名、示例占位值或文档说明。GitHub Actions 工作流不读取部署密钥；它生成的调试 APK 不包含服务器配置。
+确认真实的 `.env`、`server/data/`、`artifacts/`、APK、签名文件仍显示为忽略项，搜索结果中的密钥只来自变量名、示例占位值或文档说明。GitHub Actions 只读取仓库 Secrets 中的 Android 签名材料，不读取部署密钥；APK 不包含服务器配置。

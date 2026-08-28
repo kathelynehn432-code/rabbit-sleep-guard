@@ -2,8 +2,10 @@ package com.rabbit.sleepguard;
 
 import android.accessibilityservice.AccessibilityService;
 import android.app.admin.DevicePolicyManager;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -11,6 +13,7 @@ import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
@@ -35,8 +38,18 @@ public final class GuardAccessibilityService extends AccessibilityService {
     private String lastPackage = "";
     private long lastHandledAt = 0L;
     private boolean screenLockRequestedByUser = false;
+    private boolean screenReceiverRegistered = false;
 
     private final Runnable lockAfterReturningHome = this::lockScreenIfRequested;
+
+    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
+                main.post(GuardAccessibilityService.this::restoreGuardPage);
+            }
+        }
+    };
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -45,9 +58,10 @@ public final class GuardAccessibilityService extends AccessibilityService {
                 api.status(result -> main.post(() -> {
                     if (result.requestOk && result.active) {
                         GuardNotification.showActive(GuardAccessibilityService.this, result.attempts);
+                        restoreGuardPage();
                     } else if (result.requestOk) {
                         GuardNotification.hideActive(GuardAccessibilityService.this);
-                        removeOverlay();
+                        dismissGuardPage();
                     }
                 }));
             }
@@ -62,6 +76,8 @@ public final class GuardAccessibilityService extends AccessibilityService {
         api = new GuardApiClient(preferences);
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         GuardNotification.createChannels(this);
+        registerScreenReceiver();
+        restoreGuardPage();
         main.removeCallbacks(poll);
         main.post(poll);
     }
@@ -91,7 +107,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
                 GuardNotification.showActive(this, result.attempts);
                 GuardNotification.caught(this, appName, result.attempts);
             } else if (result.requestOk) {
-                removeOverlay();
+                dismissGuardPage();
             } else if (!result.requestOk && preferences.cachedActive()) {
                 int attempts = Math.max(1, preferences.attempts() + 1);
                 showGuardOverlay(appName, attempts, stageFor(attempts), preferences.unlocksRevoked());
@@ -112,13 +128,19 @@ public final class GuardAccessibilityService extends AccessibilityService {
 
     private void goBackToSleep() {
         main.removeCallbacks(lockAfterReturningHome);
-        removeOverlay();
-        performGlobalAction(GLOBAL_ACTION_HOME);
-        if (preferences.lockScreen()) {
+        DevicePolicyManager policy = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName admin = new ComponentName(this, GuardDeviceAdminReceiver.class);
+        boolean canLock = preferences.lockScreen() && policy != null && policy.isAdminActive(admin);
+        if (canLock) {
+            // Keep the accessibility overlay attached while the display is off. It will still be
+            // the first interactive page when the user presses the power button again.
             screenLockRequestedByUser = true;
+            performGlobalAction(GLOBAL_ACTION_HOME);
             main.postDelayed(lockAfterReturningHome, 450L);
         } else {
             screenLockRequestedByUser = false;
+            dismissGuardPage();
+            performGlobalAction(GLOBAL_ACTION_HOME);
         }
     }
 
@@ -130,7 +152,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
                 showGuardOverlay(appName, result.attempts, "refused_sleep", true);
                 return;
             }
-            removeOverlay();
+            dismissGuardPage();
             Intent intent = new Intent(this, MainActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     .putExtra(MainActivity.EXTRA_UNLOCK_REQUESTED, result.requestOk)
@@ -153,6 +175,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
     private void showGuardOverlay(String appName, int attempts, String stage, boolean unlocksRevoked) {
         cancelPendingScreenLock();
         removeOverlay();
+        preferences.showGuardPage(appName);
         LinearLayout card = baseCard();
         card.addView(title("被比比抓到了"));
 
@@ -251,7 +274,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                        | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
                 PixelFormat.TRANSLUCENT
         );
         params.gravity = Gravity.TOP | Gravity.START;
@@ -303,10 +326,39 @@ public final class GuardAccessibilityService extends AccessibilityService {
             try {
                 policy.lockNow();
             } catch (SecurityException ignored) {
-                removeOverlay();
+                dismissGuardPage();
             }
+        } else {
+            dismissGuardPage();
         }
+    }
+
+    private void restoreGuardPage() {
+        if (preferences == null || overlay != null) return;
+        if (!preferences.cachedActive() || !preferences.guardPageVisible()) return;
+        int attempts = Math.max(1, preferences.attempts());
+        showGuardOverlay(
+                preferences.guardedAppName(),
+                attempts,
+                stageFor(attempts),
+                preferences.unlocksRevoked()
+        );
+    }
+
+    private void dismissGuardPage() {
+        if (preferences != null) preferences.dismissGuardPage();
         removeOverlay();
+    }
+
+    private void registerScreenReceiver() {
+        if (screenReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenReceiver, filter);
+        }
+        screenReceiverRegistered = true;
     }
 
     private void removeOverlay() {
@@ -330,6 +382,13 @@ public final class GuardAccessibilityService extends AccessibilityService {
     public void onDestroy() {
         main.removeCallbacksAndMessages(null);
         screenLockRequestedByUser = false;
+        if (screenReceiverRegistered) {
+            try {
+                unregisterReceiver(screenReceiver);
+            } catch (IllegalArgumentException ignored) {
+            }
+            screenReceiverRegistered = false;
+        }
         removeOverlay();
         super.onDestroy();
     }

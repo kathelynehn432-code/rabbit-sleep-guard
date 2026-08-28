@@ -10,12 +10,21 @@ android {
         applicationId = "com.rabbit.sleepguard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.3.0"
     }
 
     buildTypes {
         release {
+            val keystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.create("release") {
+                    storeFile = file(keystorePath)
+                    storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+                    keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+                    keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").get()
+                }
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

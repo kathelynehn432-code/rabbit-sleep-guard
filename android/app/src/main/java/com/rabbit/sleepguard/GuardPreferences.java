@@ -19,6 +19,8 @@ public final class GuardPreferences {
     private static final String UNLOCKS_REVOKED = "unlocks_revoked";
     private static final String ENDS_AT = "ends_at";
     private static final String LAST_SYNC = "last_sync";
+    private static final String GUARD_PAGE_VISIBLE = "guard_page_visible";
+    private static final String GUARDED_APP_NAME = "guarded_app_name";
 
     private final SharedPreferences preferences;
 
@@ -88,6 +90,28 @@ public final class GuardPreferences {
 
     public long lastSync() {
         return preferences.getLong(LAST_SYNC, 0L);
+    }
+
+    public boolean guardPageVisible() {
+        return preferences.getBoolean(GUARD_PAGE_VISIBLE, false);
+    }
+
+    public String guardedAppName() {
+        return preferences.getString(GUARDED_APP_NAME, "受限应用");
+    }
+
+    public void showGuardPage(String appName) {
+        preferences.edit()
+                .putBoolean(GUARD_PAGE_VISIBLE, true)
+                .putString(GUARDED_APP_NAME, appName == null || appName.isEmpty() ? "受限应用" : appName)
+                .apply();
+    }
+
+    public void dismissGuardPage() {
+        preferences.edit()
+                .putBoolean(GUARD_PAGE_VISIBLE, false)
+                .remove(GUARDED_APP_NAME)
+                .apply();
     }
 
     public void updateState(boolean active, int attempts, int unlockRequestCount,
