@@ -35,9 +35,6 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
-    public static final String EXTRA_UNLOCK_REQUESTED = "unlock_requested";
-    public static final String EXTRA_UNLOCK_REQUEST_ERROR = "unlock_request_error";
-
     private GuardPreferences preferences;
     private GuardApiClient api;
     private EditText serverUrl;
@@ -55,7 +52,6 @@ public final class MainActivity extends Activity {
         GuardNotification.createChannels(this);
         requestNotificationPermission();
         setContentView(buildContent());
-        showUnlockRequestResult(getIntent());
         refreshStatus();
     }
 
@@ -63,7 +59,6 @@ public final class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        showUnlockRequestResult(intent);
         refreshStatus();
     }
 
@@ -281,19 +276,6 @@ public final class MainActivity extends Activity {
         intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component);
         intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "仅在睡眠守卫拦截受限应用时锁定屏幕。");
         startActivity(intent);
-    }
-
-    private void showUnlockRequestResult(Intent intent) {
-        if (intent == null || !intent.hasExtra(EXTRA_UNLOCK_REQUESTED)) return;
-        boolean recorded = intent.getBooleanExtra(EXTRA_UNLOCK_REQUESTED, false);
-        String error = intent.getStringExtra(EXTRA_UNLOCK_REQUEST_ERROR);
-        intent.removeExtra(EXTRA_UNLOCK_REQUESTED);
-        intent.removeExtra(EXTRA_UNLOCK_REQUEST_ERROR);
-        if (recorded) {
-            toast("临时解锁申请已记录；今晚的偷开次数不会清零");
-        } else {
-            toast("申请暂未同步：" + (error == null || error.isEmpty() ? "网络连接失败" : error));
-        }
     }
 
     private void requestNotificationPermission() {

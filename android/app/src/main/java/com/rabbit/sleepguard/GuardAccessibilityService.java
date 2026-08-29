@@ -148,17 +148,27 @@ public final class GuardAccessibilityService extends AccessibilityService {
         button.setEnabled(false);
         button.setText("正在留下申请记录…");
         api.requestTemporaryUnlock(appName, result -> main.post(() -> {
-            if (result.requestOk && result.unlocksRevoked) {
-                showGuardOverlay(appName, result.attempts, "refused_sleep", true);
+            if (!result.requestOk) {
+                button.setEnabled(true);
+                button.setText("申请暂未同步，点此重试");
                 return;
             }
-            dismissGuardPage();
-            Intent intent = new Intent(this, MainActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    .putExtra(MainActivity.EXTRA_UNLOCK_REQUESTED, result.requestOk)
-                    .putExtra(MainActivity.EXTRA_UNLOCK_REQUEST_ERROR, result.error);
-            startActivity(intent);
+            if (!returnHomeAndDismissGuard()) {
+                showGuardOverlay(appName, result.attempts, result.stage, result.unlocksRevoked);
+            }
         }));
+    }
+
+    private boolean returnHomeAndDismissGuard() {
+        cancelPendingScreenLock();
+        boolean homeRequested = performGlobalAction(GLOBAL_ACTION_HOME);
+        if (!homeRequested) return false;
+        dismissGuardPage();
+        // The same app may be reopened from Recents immediately. Its next window event must not
+        // be mistaken for the event that originally displayed this guard page.
+        lastPackage = "";
+        lastHandledAt = 0L;
+        return true;
     }
 
     private void showPendingOverlay(String appName) {
@@ -205,7 +215,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
 
         TextView note = body(unlocksRevoked
                 ? "今晚的临时解锁资格已经取消，守卫会持续到设定的结束时间。"
-                : "申请会留下记录并回到守卫 App，不会清掉今晚的偷开次数。");
+                : "申请记录成功后会回到桌面，不会清掉今晚的偷开次数。");
         note.setText(note.getText() + "\n当前版本 v" + BuildConfig.VERSION_NAME);
         note.setTextSize(13f);
         note.setTextColor(Color.rgb(139, 148, 177));
