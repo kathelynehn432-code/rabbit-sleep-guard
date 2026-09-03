@@ -20,7 +20,7 @@ export async function createSleepGuardServer(config) {
     const url = new URL(request.url, config.publicBaseUrl);
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        return json(response, 200, { ok: true, service: "rabbit-sleep-guard", version: "0.3.0" });
+        return json(response, 200, { ok: true, service: "rabbit-sleep-guard", version: "0.3.1" });
       }
       if (["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"].includes(url.pathname)) {
         return oauth.protectedResource(response);
