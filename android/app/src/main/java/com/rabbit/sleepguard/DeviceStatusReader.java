@@ -11,6 +11,8 @@ import android.os.PowerManager;
 
 import org.json.JSONObject;
 
+import java.util.Objects;
+
 public final class DeviceStatusReader {
     public static final class Snapshot {
         public final int batteryLevel;
@@ -42,6 +44,16 @@ public final class DeviceStatusReader {
             } catch (Exception ignored) {
             }
             return body;
+        }
+
+        public boolean hasSameStatus(Snapshot other) {
+            return other != null
+                    && batteryLevel == other.batteryLevel
+                    && charging == other.charging
+                    && Objects.equals(batteryTemperatureC, other.batteryTemperatureC)
+                    && networkType.equals(other.networkType)
+                    && networkConnected == other.networkConnected
+                    && screenOn == other.screenOn;
         }
     }
 

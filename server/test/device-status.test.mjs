@@ -15,6 +15,7 @@ test("phone reports are normalized and online only inside the reporting window",
   const reported = normalizeDeviceStatus(sample, "2026-09-03T10:00:00.000Z");
   assert.equal(reported.battery_level, 73);
   assert.equal(reported.battery_temperature_c, 31.3);
+  assert.equal(ONLINE_WINDOW_MS, 40 * 60_000);
   assert.equal(publicDeviceStatus(reported, Date.parse(reported.last_updated_at) + ONLINE_WINDOW_MS).online, true);
   assert.equal(publicDeviceStatus(reported, Date.parse(reported.last_updated_at) + ONLINE_WINDOW_MS + 1).online, false);
 });

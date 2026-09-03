@@ -193,7 +193,7 @@ public final class MainActivity extends Activity {
 
         addSectionTitle(root, "执行权限");
         LinearLayout permissions = card(false);
-        TextView permissionHint = text("无障碍服务负责识别受限应用并每 5 分钟上报一次状态。", 14, MUTED);
+        TextView permissionHint = text("无障碍服务负责识别受限应用，并在状态变化时及时上报。", 14, MUTED);
         permissions.addView(permissionHint);
         Button accessibility = button("打开无障碍设置", true);
         accessibility.setOnClickListener(view -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
@@ -235,7 +235,7 @@ public final class MainActivity extends Activity {
         appsCard.addView(saveApps, topMargin(12));
         root.addView(appsCard, topMargin(10));
 
-        TextView footer = text("每 5 分钟定时上报 · 离线时沿用最近一次有效守卫状态\n兔酱睡眠守卫 v" + BuildConfig.VERSION_NAME, 12, SUBTLE);
+        TextView footer = text("状态变化时上报 · 30 分钟轻量心跳 · 离线时沿用最近一次有效守卫状态\n兔酱睡眠守卫 v" + BuildConfig.VERSION_NAME, 12, SUBTLE);
         footer.setGravity(Gravity.CENTER);
         footer.setLineSpacing(dp(3), 1f);
         root.addView(footer, topMargin(24));

@@ -13,6 +13,9 @@ import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -27,7 +30,8 @@ import android.widget.TextView;
 import java.util.Set;
 
 public final class GuardAccessibilityService extends AccessibilityService {
-    private static final long POLL_INTERVAL_MS = 300_000L;
+    private static final long HEARTBEAT_INTERVAL_MS = 30 * 60_000L;
+    private static final long STATUS_CHANGE_DEBOUNCE_MS = 1_000L;
     private static final long EVENT_DEBOUNCE_MS = 2_500L;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -38,39 +42,81 @@ public final class GuardAccessibilityService extends AccessibilityService {
     private String lastPackage = "";
     private long lastHandledAt = 0L;
     private boolean screenLockRequestedByUser = false;
-    private boolean screenReceiverRegistered = false;
+    private boolean statusReceiverRegistered = false;
+    private boolean networkCallbackRegistered = false;
+    private boolean reportInFlight = false;
+    private boolean reportPending = false;
+    private DeviceStatusReader.Snapshot lastReportedStatus;
+    private ConnectivityManager connectivityManager;
 
     private final Runnable lockAfterReturningHome = this::lockScreenIfRequested;
 
-    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
+    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
                 main.post(GuardAccessibilityService.this::restoreGuardPage);
             }
-            reportAndRefreshGuard();
+            scheduleStatusChangeReport();
         }
     };
 
-    private final Runnable poll = new Runnable() {
+    private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
+        @Override
+        public void onAvailable(Network network) {
+            scheduleStatusChangeReport();
+        }
+
+        @Override
+        public void onLost(Network network) {
+            scheduleStatusChangeReport();
+        }
+
+        @Override
+        public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+            scheduleStatusChangeReport();
+        }
+    };
+
+    private final Runnable statusChangeReport = () -> reportAndRefreshGuard(false);
+
+    private final Runnable heartbeat = new Runnable() {
         @Override
         public void run() {
             if (api != null && preferences.configured()) {
-                reportAndRefreshGuard();
+                reportAndRefreshGuard(true);
             }
-            main.postDelayed(this, POLL_INTERVAL_MS);
+            main.postDelayed(this, HEARTBEAT_INTERVAL_MS);
         }
     };
 
-    private void reportAndRefreshGuard() {
+    private void scheduleStatusChangeReport() {
+        main.removeCallbacks(statusChangeReport);
+        main.postDelayed(statusChangeReport, STATUS_CHANGE_DEBOUNCE_MS);
+    }
+
+    private void reportAndRefreshGuard(boolean force) {
         if (api == null || preferences == null || !preferences.configured()) return;
-        api.reportDeviceStatus(DeviceStatusReader.read(this), result -> main.post(() -> {
+        DeviceStatusReader.Snapshot snapshot = DeviceStatusReader.read(this);
+        if (!force && snapshot.hasSameStatus(lastReportedStatus)) return;
+        if (reportInFlight) {
+            reportPending = true;
+            return;
+        }
+        reportInFlight = true;
+        api.reportDeviceStatus(snapshot, result -> main.post(() -> {
+            reportInFlight = false;
+            if (result.requestOk) lastReportedStatus = snapshot;
             if (result.requestOk && result.active) {
                 GuardNotification.showActive(GuardAccessibilityService.this, result.attempts);
                 restoreGuardPage();
             } else if (result.requestOk) {
                 GuardNotification.hideActive(GuardAccessibilityService.this);
                 dismissGuardPage();
+            }
+            if (reportPending) {
+                reportPending = false;
+                reportAndRefreshGuard(false);
             }
         }));
     }
@@ -82,10 +128,11 @@ public final class GuardAccessibilityService extends AccessibilityService {
         api = new GuardApiClient(preferences);
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         GuardNotification.createChannels(this);
-        registerScreenReceiver();
+        registerStatusReceiver();
+        registerNetworkCallback();
         restoreGuardPage();
-        main.removeCallbacks(poll);
-        main.post(poll);
+        main.removeCallbacks(heartbeat);
+        main.post(heartbeat);
     }
 
     @Override
@@ -366,16 +413,28 @@ public final class GuardAccessibilityService extends AccessibilityService {
         removeOverlay();
     }
 
-    private void registerScreenReceiver() {
-        if (screenReceiverRegistered) return;
+    private void registerStatusReceiver() {
+        if (statusReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
-            registerReceiver(screenReceiver, filter);
+            registerReceiver(statusReceiver, filter);
         }
-        screenReceiverRegistered = true;
+        statusReceiverRegistered = true;
+    }
+
+    private void registerNetworkCallback() {
+        if (networkCallbackRegistered) return;
+        connectivityManager = getSystemService(ConnectivityManager.class);
+        if (connectivityManager == null) return;
+        try {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback);
+            networkCallbackRegistered = true;
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private void removeOverlay() {
@@ -399,12 +458,19 @@ public final class GuardAccessibilityService extends AccessibilityService {
     public void onDestroy() {
         main.removeCallbacksAndMessages(null);
         screenLockRequestedByUser = false;
-        if (screenReceiverRegistered) {
+        if (statusReceiverRegistered) {
             try {
-                unregisterReceiver(screenReceiver);
+                unregisterReceiver(statusReceiver);
             } catch (IllegalArgumentException ignored) {
             }
-            screenReceiverRegistered = false;
+            statusReceiverRegistered = false;
+        }
+        if (networkCallbackRegistered && connectivityManager != null) {
+            try {
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+            } catch (RuntimeException ignored) {
+            }
+            networkCallbackRegistered = false;
         }
         removeOverlay();
         super.onDestroy();

@@ -1,5 +1,5 @@
 const NETWORK_TYPES = new Set(["wifi", "cellular", "ethernet", "vpn", "other", "offline", "unknown"]);
-export const ONLINE_WINDOW_MS = 11 * 60_000;
+export const ONLINE_WINDOW_MS = 40 * 60_000;
 
 export function emptyDeviceStatus() {
   return {
