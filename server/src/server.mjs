@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { GuardService, publicState } from "./guard-state.mjs";
+import { DeviceStatusService, publicDeviceStatus } from "./device-status.mjs";
 import { bearer, json, readJson, sameSecret } from "./http-utils.mjs";
 import { JsonStore } from "./json-store.mjs";
 import { handleMcp } from "./mcp.mjs";
@@ -12,13 +13,14 @@ export async function createSleepGuardServer(config) {
   const store = new JsonStore(config.dataDir);
   await store.init();
   const guard = new GuardService(store, config);
+  const deviceStatus = new DeviceStatusService(store);
   const oauth = new OAuthService(store, config);
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, config.publicBaseUrl);
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        return json(response, 200, { ok: true, service: "rabbit-sleep-guard", version: "0.2.0" });
+        return json(response, 200, { ok: true, service: "rabbit-sleep-guard", version: "0.3.0" });
       }
       if (["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"].includes(url.pathname)) {
         return oauth.protectedResource(response);
@@ -31,12 +33,26 @@ export async function createSleepGuardServer(config) {
       // ChatGPT keeps using the exact connection URL as the MCP transport URL.
       // Accept the origin as a compatibility alias so an existing connection
       // created without the documented `/mcp` suffix can still initialize.
-      if (["/", "/mcp"].includes(url.pathname)) return await handleMcp(request, response, guard, oauth, config);
+      if (["/", "/mcp"].includes(url.pathname)) return await handleMcp(request, response, guard, deviceStatus, oauth, config);
 
       if (url.pathname.startsWith("/api/device/")) {
         if (!sameSecret(bearer(request), config.androidDeviceToken)) return json(response, 401, { ok: false, error: "unauthorized" });
         if (request.method === "GET" && url.pathname === "/api/device/status") {
-          return json(response, 200, { ok: true, ...publicState(await guard.status()) });
+          return json(response, 200, {
+            ok: true,
+            ...publicState(await guard.status()),
+            device_status: publicDeviceStatus(await deviceStatus.status()),
+          });
+        }
+        if (request.method === "POST" && url.pathname === "/api/device/report") {
+          const payload = await readJson(request);
+          const report = await deviceStatus.report(payload);
+          if (!report.ok) return json(response, 422, report);
+          return json(response, 200, {
+            ok: true,
+            ...publicState(await guard.status()),
+            device_status: publicDeviceStatus(report.status),
+          });
         }
         if (request.method === "POST" && url.pathname === "/api/device/event") {
           const payload = await readJson(request);
@@ -60,6 +76,9 @@ export async function createSleepGuardServer(config) {
         if (request.method === "GET" && url.pathname === "/api/control/status") {
           return json(response, 200, { ok: true, ...publicState(await guard.status()) });
         }
+        if (request.method === "GET" && url.pathname === "/api/control/device-status") {
+          return json(response, 200, { ok: true, device_status: publicDeviceStatus(await deviceStatus.status()) });
+        }
         if (request.method === "POST" && url.pathname === "/api/control/activate") {
           const body = await readJson(request);
           const result = await guard.event({ event: "sleep_guard_started", ends_at: body.ends_at }, "server_control_api");
@@ -78,7 +97,7 @@ export async function createSleepGuardServer(config) {
       response.end();
     }
   });
-  return { server, guard, oauth, store };
+  return { server, guard, deviceStatus, oauth, store };
 }
 
 const isDirectEntry = fileURLToPath(import.meta.url) === resolve(process.argv[1]);

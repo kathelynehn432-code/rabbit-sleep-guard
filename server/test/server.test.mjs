@@ -98,6 +98,47 @@ test("device and server control APIs share one state", async () => {
   }
 });
 
+test("Android status reports are stored and exposed to control API and MCP", async () => {
+  const context = await fixture();
+  try {
+    const deviceHeaders = { authorization: `Bearer ${context.config.androidDeviceToken}`, "content-type": "application/json" };
+    let response = await fetch(`${context.url}/api/device/report`, {
+      method: "POST",
+      headers: deviceHeaders,
+      body: JSON.stringify({
+        battery_level: 82,
+        charging: true,
+        battery_temperature_c: 32.4,
+        network_type: "wifi",
+        network_connected: true,
+        screen_on: true,
+      }),
+    });
+    assert.equal(response.status, 200);
+    const report = await response.json();
+    assert.equal(report.device_status.online, true);
+    assert.equal(report.device_status.battery_level, 82);
+
+    response = await fetch(`${context.url}/api/control/device-status`, {
+      headers: { authorization: `Bearer ${context.config.codexControlToken}` },
+    });
+    const control = await response.json();
+    assert.equal(control.device_status.network_type, "wifi");
+    assert.ok(control.device_status.last_updated_at);
+
+    response = await fetch(`${context.url}/mcp`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${context.config.codexControlToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "get_phone_status", arguments: {} } }),
+    });
+    const tool = await response.json();
+    assert.equal(tool.result.structuredContent.battery_level, 82);
+    assert.match(tool.result.content[0].text, /手机在线/);
+  } finally {
+    await close(context.server);
+  }
+});
+
 test("static bearer token gives server Codex access to MCP", async () => {
   const context = await fixture();
   try {
@@ -112,6 +153,7 @@ test("static bearer token gives server Codex access to MCP", async () => {
       "activate_sleep_guard",
       "deactivate_sleep_guard",
       "get_sleep_guard_status",
+      "get_phone_status",
     ]);
 
     response = await fetch(`${context.url}/mcp`, {
@@ -225,7 +267,7 @@ test("OAuth DCR and PKCE authorize an official-client MCP session", async () => 
     });
     assert.equal(response.status, 200);
     const listed = await response.json();
-    assert.equal(listed.result.tools.length, 3);
+    assert.equal(listed.result.tools.length, 4);
     assert.deepEqual(listed.result.tools[0].securitySchemes, [
       { type: "oauth2", scopes: ["sleep_guard:write"] },
     ]);

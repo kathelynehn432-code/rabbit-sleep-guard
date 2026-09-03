@@ -16,6 +16,7 @@ export class JsonStore {
   constructor(dataDir) {
     this.dataDir = dataDir;
     this.statePath = join(dataDir, "state.json");
+    this.deviceStatusPath = join(dataDir, "device-status.json");
     this.authPath = join(dataDir, "auth.json");
     this.eventsPath = join(dataDir, "events.jsonl");
   }
@@ -38,6 +39,14 @@ export class JsonStore {
     return this.#atomicWrite(this.statePath, value);
   }
 
+  readDeviceStatus(fallback) {
+    return readJson(this.deviceStatusPath, fallback);
+  }
+
+  writeDeviceStatus(value) {
+    return this.#atomicWrite(this.deviceStatusPath, value);
+  }
+
   readAuth(fallback) {
     return readJson(this.authPath, fallback);
   }
@@ -58,4 +67,3 @@ export class JsonStore {
     await rename(temporary, path);
   }
 }
-

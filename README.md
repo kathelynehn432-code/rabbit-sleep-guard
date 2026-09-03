@@ -6,6 +6,8 @@
 - 服务器中的 Codex（固定 Bearer Token）；
 - ChatGPT 官端或其他支持远程 MCP 的客户端（OAuth 2.1 + PKCE）。
 
+Android 端还会随无障碍服务每 5 分钟上报电量、充电状态、电池温度、网络和屏幕状态。服务器按最近一次上报时间判断手机是否在线，并通过 MCP 提供查询。
+
 不需要 ntfy、Shizuku、Bark、Firebase 或数据库。服务器只需要 Node.js 22，运行时无第三方 npm 依赖。
 
 ## 它实际怎样工作
@@ -66,11 +68,12 @@ url = "https://sleep.example.com/mcp"
 bearer_token_env_var = "SLEEP_GUARD_CODEX_TOKEN"
 ```
 
-重新打开 Codex 后，应能看到三个工具：
+重新打开 Codex 后，应能看到四个工具：
 
 - `activate_sleep_guard`
 - `deactivate_sleep_guard`
 - `get_sleep_guard_status`
+- `get_phone_status`
 
 服务器上也附带不经过 MCP 的管理命令，便于脚本或排错：
 
@@ -105,7 +108,7 @@ Android 8.0 及以上可用。项目的 `minSdk` 是 26，`targetSdk` 是 35。
 5. 勾选要拦截的娱乐应用并保存。
 6. 在 vivo / OriginOS 中允许后台运行，关闭该应用的电量优化限制。无障碍服务本身通常可以常驻，但 vivo 的后台管理仍建议放行。
 
-应用不会读取页面文字或输入内容。它只使用无障碍事件里的应用包名，且只处理你主动勾选的包。
+应用不会读取页面文字或输入内容。它只使用无障碍事件里的应用包名，且只处理你主动勾选的包。状态首页使用月光蓝紫的磨砂玻璃视觉，并直接显示本机电量、充电、温度、网络、屏幕、在线状态和最后上报时间。
 
 5 分钟一次的后台同步约占每月 8,640 次请求，适配 ngrok 免费套餐的请求额度；打开受限应用时的即时确认不依赖下一次后台同步。网络临时不可用且最近一次有效状态为开启时，应用仍按开启状态执行。
 
@@ -136,6 +139,8 @@ node --test
 
 当前覆盖状态启动、三档偷开计数、三次临时解锁申请、第三次申请后撤销资格、重复开启不清零、解除、凌晨自动启动、过期、Android 与控制 API 共用状态、静态令牌 MCP，以及未授权客户端的 OAuth 发现入口。
 
+另外覆盖手机状态输入校验、持久化、在线窗口、控制 API 和 `get_phone_status` MCP 查询。
+
 ## 数据文件
 
 运行后服务器只在 `server/data/` 保存：
@@ -143,6 +148,7 @@ node --test
 - `state.json`：当前守卫状态；
 - `events.jsonl`：事件与拦截次数记录；
 - `auth.json`：OAuth 客户端、授权码摘要与访问令牌摘要。
+- `device-status.json`：手机最近一次上报的电池、网络、屏幕状态与服务器接收时间。
 
 密钥本身只存在 `.env`。OAuth 访问令牌和授权码在磁盘中仅保存 SHA-256 摘要。
 

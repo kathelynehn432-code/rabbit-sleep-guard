@@ -48,6 +48,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
             if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
                 main.post(GuardAccessibilityService.this::restoreGuardPage);
             }
+            reportAndRefreshGuard();
         }
     };
 
@@ -55,19 +56,24 @@ public final class GuardAccessibilityService extends AccessibilityService {
         @Override
         public void run() {
             if (api != null && preferences.configured()) {
-                api.status(result -> main.post(() -> {
-                    if (result.requestOk && result.active) {
-                        GuardNotification.showActive(GuardAccessibilityService.this, result.attempts);
-                        restoreGuardPage();
-                    } else if (result.requestOk) {
-                        GuardNotification.hideActive(GuardAccessibilityService.this);
-                        dismissGuardPage();
-                    }
-                }));
+                reportAndRefreshGuard();
             }
             main.postDelayed(this, POLL_INTERVAL_MS);
         }
     };
+
+    private void reportAndRefreshGuard() {
+        if (api == null || preferences == null || !preferences.configured()) return;
+        api.reportDeviceStatus(DeviceStatusReader.read(this), result -> main.post(() -> {
+            if (result.requestOk && result.active) {
+                GuardNotification.showActive(GuardAccessibilityService.this, result.attempts);
+                restoreGuardPage();
+            } else if (result.requestOk) {
+                GuardNotification.hideActive(GuardAccessibilityService.this);
+                dismissGuardPage();
+            }
+        }));
+    }
 
     @Override
     protected void onServiceConnected() {
@@ -363,6 +369,7 @@ public final class GuardAccessibilityService extends AccessibilityService {
     private void registerScreenReceiver() {
         if (screenReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {

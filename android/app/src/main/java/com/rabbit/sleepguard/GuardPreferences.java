@@ -19,6 +19,7 @@ public final class GuardPreferences {
     private static final String UNLOCKS_REVOKED = "unlocks_revoked";
     private static final String ENDS_AT = "ends_at";
     private static final String LAST_SYNC = "last_sync";
+    private static final String LAST_DEVICE_REPORT = "last_device_report";
     private static final String GUARD_PAGE_VISIBLE = "guard_page_visible";
     private static final String GUARDED_APP_NAME = "guarded_app_name";
 
@@ -90,6 +91,14 @@ public final class GuardPreferences {
 
     public long lastSync() {
         return preferences.getLong(LAST_SYNC, 0L);
+    }
+
+    public long lastDeviceReport() {
+        return preferences.getLong(LAST_DEVICE_REPORT, 0L);
+    }
+
+    public void markDeviceReported() {
+        preferences.edit().putLong(LAST_DEVICE_REPORT, System.currentTimeMillis()).apply();
     }
 
     public boolean guardPageVisible() {

@@ -27,10 +27,11 @@ public final class GuardApiClient {
         public final String stage;
         public final String endsAt;
         public final String error;
+        public final DeviceStatus deviceStatus;
 
         Result(boolean requestOk, boolean active, boolean ignored, int attempts,
                int unlockRequestCount, boolean unlocksRevoked, String stage,
-               String endsAt, String error) {
+               String endsAt, String error, DeviceStatus deviceStatus) {
             this.requestOk = requestOk;
             this.active = active;
             this.ignored = ignored;
@@ -40,6 +41,29 @@ public final class GuardApiClient {
             this.stage = stage;
             this.endsAt = endsAt;
             this.error = error;
+            this.deviceStatus = deviceStatus;
+        }
+    }
+
+    public static final class DeviceStatus {
+        public final Integer batteryLevel;
+        public final Boolean charging;
+        public final Double batteryTemperatureC;
+        public final String networkType;
+        public final boolean networkConnected;
+        public final Boolean screenOn;
+        public final boolean online;
+        public final String lastUpdatedAt;
+
+        DeviceStatus(JSONObject json) {
+            batteryLevel = json.has("battery_level") && !json.isNull("battery_level") ? json.optInt("battery_level") : null;
+            charging = json.has("charging") && !json.isNull("charging") ? json.optBoolean("charging") : null;
+            batteryTemperatureC = json.has("battery_temperature_c") && !json.isNull("battery_temperature_c") ? json.optDouble("battery_temperature_c") : null;
+            networkType = json.optString("network_type", "unknown");
+            networkConnected = json.optBoolean("network_connected", false);
+            screenOn = json.has("screen_on") && !json.isNull("screen_on") ? json.optBoolean("screen_on") : null;
+            online = json.optBoolean("online", false);
+            lastUpdatedAt = json.optString("last_updated_at", "");
         }
     }
 
@@ -52,6 +76,10 @@ public final class GuardApiClient {
 
     public void status(Callback callback) {
         request("GET", "/api/device/status", null, callback);
+    }
+
+    public void reportDeviceStatus(DeviceStatusReader.Snapshot snapshot, Callback callback) {
+        request("POST", "/api/device/report", snapshot.toJson(), callback);
     }
 
     public void start(Callback callback) {
@@ -103,7 +131,7 @@ public final class GuardApiClient {
         NETWORK.execute(() -> {
             Result result;
             if (!preferences.configured()) {
-                result = new Result(false, false, false, 0, 0, false, "inactive", "", "请先填写 HTTPS 服务器地址和设备令牌");
+                result = new Result(false, false, false, 0, 0, false, "inactive", "", "请先填写 HTTPS 服务器地址和设备令牌", null);
             } else {
                 result = execute(method, path, body);
             }
@@ -146,14 +174,17 @@ public final class GuardApiClient {
             String stage = json.optString("stage", active ? "armed" : "inactive");
             String endsAt = json.optString("ends_at", "");
             boolean ignored = json.optBoolean("ignored", false);
+            JSONObject deviceJson = json.optJSONObject("device_status");
+            DeviceStatus deviceStatus = deviceJson == null ? null : new DeviceStatus(deviceJson);
             if (ok) preferences.updateState(active, attempts, unlockRequestCount, unlocksRevoked, endsAt);
+            if (ok && "POST".equals(method) && "/api/device/report".equals(path)) preferences.markDeviceReported();
             return new Result(ok, active, ignored, attempts, unlockRequestCount, unlocksRevoked,
-                    stage, endsAt, ok ? "" : json.optString("error", "HTTP " + code));
+                    stage, endsAt, ok ? "" : json.optString("error", "HTTP " + code), deviceStatus);
         } catch (Exception error) {
             int attempts = preferences.attempts();
             return new Result(false, preferences.cachedActive(), false, attempts,
                     preferences.unlockRequestCount(), preferences.unlocksRevoked(), stageFor(attempts),
-                    preferences.endsAt(), error.getClass().getSimpleName());
+                    preferences.endsAt(), error.getClass().getSimpleName(), null);
         } finally {
             if (connection != null) connection.disconnect();
         }
